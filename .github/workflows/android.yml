@@ -148,6 +148,7 @@ jobs:
             Java_app_dot_Bridge_nativeGetAvInfo Java_app_dot_Bridge_nativeRunFrame \
             Java_app_dot_Bridge_nativeGetFrame Java_app_dot_Bridge_nativeReadAudio \
             Java_app_dot_Bridge_nativeSetAudioDiscard Java_app_dot_Bridge_nativeSetInput \
+            Java_app_dot_Bridge_nativeRumbleLevel \
             Java_app_dot_Bridge_nativeSetOption Java_app_dot_Bridge_nativeSerializeSize \
             Java_app_dot_Bridge_nativeSerialize Java_app_dot_Bridge_nativeUnserialize \
             Java_app_dot_Bridge_nativeSaveRamSize Java_app_dot_Bridge_nativeReadSaveRam \

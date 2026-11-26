@@ -1,5 +1,10 @@
 # Dot Phase 0 — release verification (builder's own download)
 
+Note (2026-11-26, slice 3): the APK copies were moved out of this
+tree into ~/workspace/dot-verify/ — release APKs live on the
+GitHub release, not in the repo. The hashes above still verify
+against the release asset.
+
 - Release: https://github.com/DocBobert6/Dot/releases/tag/v0.1.0-phase0.1
 - Tag run: 45871075842 (build success, release success)
 - Commit: 8aa45bfa84705bf4a9c019ea991260ac8e534112

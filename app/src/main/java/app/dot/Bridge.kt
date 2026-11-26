@@ -52,6 +52,13 @@ object Bridge {
     external fun nativeReadAudio(samples: ShortArray, maxFrames: Int): Int
     external fun nativeSetAudioDiscard(discard: Boolean)
     external fun nativeSetInput(mask: Int)
+
+    /**
+     * The core's current rumble level, 0..65535 (0 = not rumbling).
+     * Max of the strong and weak motors, driven by the core's rumble
+     * interface for rumble-pak games. 0 when no game is loaded.
+     */
+    external fun nativeRumbleLevel(): Int
     external fun nativeSetOption(key: String, value: String): Boolean
     external fun nativeSerializeSize(): Int
     external fun nativeSerialize(data: ByteArray): Boolean

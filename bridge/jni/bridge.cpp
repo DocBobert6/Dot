@@ -262,6 +262,28 @@ static int16_t inputStateCallback(unsigned port, unsigned device,
     return (mask & (1 << id)) != 0 ? 1 : 0;
 }
 
+// ------------------------------------------------------------- rumble
+
+// The libretro rumble interface: the core calls set_rumble_state
+// when a game rumbles its pak (Pokemon Pinball). The level is the
+// max of the strong and weak motors, 0..65535. Dot's rumble gate
+// (RumbleGate.kt) reads it once per frame: while the game rumbles,
+// UI haptics are suppressed — game rumble wins over UI clicks.
+// The core only ever calls this while a game is loaded; the level
+// resets on unload/deinit.
+static std::atomic<int32_t> g_rumbleStrong{0};
+static std::atomic<int32_t> g_rumbleWeak{0};
+
+static void rumbleCallback(unsigned port, retro_rumble_effect effect,
+                           uint16_t strength) {
+    (void)port;
+    if (effect == RETRO_RUMBLE_STRONG) {
+        g_rumbleStrong.store((int32_t)strength);
+    } else if (effect == RETRO_RUMBLE_WEAK) {
+        g_rumbleWeak.store((int32_t)strength);
+    }
+}
+
 // --------------------------------------------------------- environment
 
 // Core logs are noise for Dot; the function must be a plain static
@@ -315,7 +337,11 @@ static bool environmentCallback(unsigned cmd, void* data) {
         logCb->log = &logCallback;
         return true;
     }
-    case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
+    case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE: {
+        auto* rumble = static_cast<retro_rumble_interface*>(data);
+        rumble->set_rumble_state = &rumbleCallback;
+        return true;
+    }
     case RETRO_ENVIRONMENT_GET_SENSOR_INTERFACE:
     case RETRO_ENVIRONMENT_GET_CAMERA_INTERFACE:
     case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE:
@@ -560,6 +586,14 @@ Java_app_dot_Bridge_nativeSetInput(JNIEnv* /* env */, jclass /* clazz */,
     g_inputMask.store(mask);
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_app_dot_Bridge_nativeRumbleLevel(JNIEnv* /* env */,
+                                      jclass /* clazz */) {
+    int32_t strong = g_rumbleStrong.load();
+    int32_t weak = g_rumbleWeak.load();
+    return strong > weak ? strong : weak;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_app_dot_Bridge_nativeSetOption(JNIEnv* env, jclass /* clazz */,
                                     jstring key, jstring value) {
@@ -787,6 +821,8 @@ Java_app_dot_Bridge_nativeUnloadGame(JNIEnv* /* env */,
         retro_unload_game();
         g_gameLoaded = false;
     }
+    g_rumbleStrong.store(0);
+    g_rumbleWeak.store(0);
     {
         std::lock_guard<std::mutex> frameLock(g_frameMutex);
         g_frameReady = false;
@@ -800,6 +836,8 @@ Java_app_dot_Bridge_nativeDeinit(JNIEnv* /* env */, jclass /* clazz */) {
         retro_unload_game();
         g_gameLoaded = false;
     }
+    g_rumbleStrong.store(0);
+    g_rumbleWeak.store(0);
     if (g_coreLive) {
         retro_deinit();
         g_coreLive = false;
