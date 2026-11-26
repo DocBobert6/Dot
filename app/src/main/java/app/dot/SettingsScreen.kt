@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.dot.gl.GlDrawStats
 import app.dot.gl.GlFailureReport
 import java.io.File
 import kotlinx.coroutines.delay
@@ -518,6 +519,24 @@ fun SettingsScreen(
             HelpText(
                 "A failure is recorded the moment the graphics layer " +
                     "fails.",
+            )
+            Spacer(Modifier.height(8.dp))
+            // Live draw counts from the graphics layer, so a black
+            // screen can be told apart from a dead chain without a
+            // benchmark run: draws attempted with charcoal by surface
+            // is a sizing problem, charcoal by latch is a failed
+            // chain, zero attempts is a gate that never fired. The
+            // counts are for the current GL surface (they reset
+            // when it is rebuilt) and read fresh each time this
+            // screen opens.
+            Text(
+                GlDrawStats.snapshot(),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .verticalScroll(rememberScrollState()),
             )
         } else {
             Row(

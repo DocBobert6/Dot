@@ -53,6 +53,31 @@ class GlFailureTest {
     }
 
     @Test
+    fun formatParseRoundTripWithDrawStats() {
+        val stats =
+            "Draws attempted: 12\n" +
+                "Draws shown: 0\n" +
+                "Charcoal draws: 12 (latch: 0, surface: 12, area: 0)\n" +
+                "Frames skipped (unchanged): 0\n" +
+                "Frames with no pending frame: 0\n" +
+                "Last surface: 0x0\n" +
+                "Last charcoal reason: surface 0x0\n" +
+                "Latch failed: no"
+        val f = sampleFailure().copy(drawStats = stats)
+        val parsed = GlFailureReport.parse(GlFailureReport.format(f))
+        assertEquals(f, parsed)
+    }
+
+    @Test
+    fun parseOldFormatYieldsEmptyDrawStats() {
+        // A report written before the stats existed has no stats
+        // lines: it still parses, with drawStats empty.
+        val f = sampleFailure()
+        val parsed = GlFailureReport.parse(GlFailureReport.format(f))
+        assertEquals("", parsed?.drawStats)
+    }
+
+    @Test
     fun formatParseRoundTripWithUnknownGpuAndGame() {
         val f = sampleFailure().copy(gpu = null, game = null, fallbackEngaged = true)
         val parsed = GlFailureReport.parse(GlFailureReport.format(f))

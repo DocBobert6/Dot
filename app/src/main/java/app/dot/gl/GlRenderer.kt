@@ -44,6 +44,14 @@ interface GlChainHost {
     fun glFailureAppVersion(): String
     /** Reads and clears the pending frame; re-arms the render gate. Null when no frame is pending. */
     fun takePendingFrame(): GlFrame?
+    /**
+     * Called after a frame actually drew (not on a charcoal
+     * early-return, not on a hash-match skip): the presented-frame
+     * tick for the benchmark's presented clock and the live FPS
+     * counter. The default is a no-op so test hosts need not
+     * implement it; production hosts must.
+     */
+    fun onFramePresented() {}
 }
 
 class GlRenderer(
@@ -103,7 +111,9 @@ class GlRenderer(
     private var surfaceHeight = 0
     private var resolvedTargetHeight = 1080
     private var frameCount = 0
-    private var lastHash: Long = -1L
+
+    /** The pure draw-decision state: owns lastHash, so a charcoal draw can never poison it. */
+    private val drawDecision = DrawDecision()
 
     // ---- GLSurfaceView.Renderer --------------------------------------
 
@@ -124,7 +134,8 @@ class GlRenderer(
         maskTex = 0
         maskTexAllocated = false
         blueNoiseTex = 0
-        lastHash = -1L
+        drawDecision.reset()
+        GlDrawStats.reset()
         buildQuads()
         buildPersistentTextures()
         // Clear the latch LAST: if anything above threw, it stays set.
@@ -134,6 +145,11 @@ class GlRenderer(
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         surfaceWidth = width
         surfaceHeight = height
+        // A real size arriving resets the draw hash: a frame that
+        // only ever drew charcoal on a 0-sized surface must draw
+        // for real now, even with the identical hash.
+        drawDecision.onSurfaceSized(width, height)
+        GlDrawStats.noteSurface(width, height)
         // The game target depends on surface size: drop every pooled
         // target (a stale pool across a change corrupts the chain).
         dropPooledTargets()
@@ -141,18 +157,50 @@ class GlRenderer(
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        GlDrawStats.noteAttempt()
         if (latch.isFailed) {
+            GlDrawStats.noteCharcoal(CharcoalReason.Latch)
             clearCharcoalFull()
             return
         }
         val startNanos = System.nanoTime()
         try {
-            val frame = host.takePendingFrame() ?: return
+            val frame = host.takePendingFrame() ?: run {
+                GlDrawStats.noteIdle()
+                return
+            }
+            // The pure charcoal decision, before any GL call: a
+            // frame that clears charcoal must NOT consume its hash.
+            // On a static title screen every later frame has the
+            // identical hash, so consuming it here froze the screen
+            // on charcoal forever (Phase 1.2, device).
+            val targetHeight = resolveTargetHeight()
+            val reason = drawDecision.charcoalReason(
+                surfaceWidth, surfaceHeight,
+                internalGameArea(targetHeight), onScreenGameArea(targetHeight),
+            )
+            if (reason != null) {
+                GlDrawStats.noteCharcoal(reason)
+                clearCharcoalFull()
+                return
+            }
             // Static-frame reuse (GL-CHAIN-SPEC §8.4): an unchanged
             // frame needs no re-render; the previous output stays.
-            if (frame.hash == lastHash) return
-            drawChain(frame)
-            lastHash = frame.hash
+            if (!drawDecision.needsDraw(frame.hash)) {
+                GlDrawStats.noteHashSkipped()
+                return
+            }
+            // drawChain reports why it cleared charcoal instead of
+            // drawing (a guard firing after the pre-check, e.g. the
+            // surface resized mid-draw): the hash stays unconsumed.
+            val drawReason = drawChain(frame)
+            if (drawReason == null) {
+                drawDecision.markDrawn(frame.hash)
+                GlDrawStats.noteDrawn()
+                host.onFramePresented()
+            } else {
+                GlDrawStats.noteCharcoal(drawReason)
+            }
         } catch (e: Throwable) {
             failGl("frame", "unknown", e)
         } finally {
@@ -162,10 +210,16 @@ class GlRenderer(
 
     // ---- the chain ----------------------------------------------------
 
-    private fun drawChain(frame: GlFrame) {
+    /**
+     * Runs the chain for one frame. Returns null when the game
+     * actually drew; returns the charcoal reason when a guard
+     * fired instead — the caller must not consume the frame's hash
+     * on that path (DrawDecision).
+     */
+    private fun drawChain(frame: GlFrame): CharcoalReason? {
         if (surfaceWidth <= 0 || surfaceHeight <= 0) {
             clearCharcoalFull()
-            return
+            return CharcoalReason.Surface
         }
         val targetHeight = resolveTargetHeight()
         if (targetHeight != resolvedTargetHeight) {
@@ -178,7 +232,7 @@ class GlRenderer(
             onScreen.first <= 0 || onScreen.second <= 0
         ) {
             clearCharcoalFull()
-            return
+            return CharcoalReason.Area
         }
         val useMitchell = internal.first > onScreen.first ||
             internal.second > onScreen.second
@@ -357,6 +411,7 @@ class GlRenderer(
         )
         frameCount++
         checkGl("chain")
+        return null
     }
 
     // ---- framing (§1.2, §1.5) ----------------------------------------
@@ -716,6 +771,7 @@ class GlRenderer(
 
     private fun failGl(where: String, program: String, e: Throwable) {
         latch.markFailed()
+        GlDrawStats.noteLatchFailed()
         clearCharcoalFull()
         val failure = GlFailure(
             time = java.text.SimpleDateFormat(
@@ -735,6 +791,7 @@ class GlRenderer(
                 append("\n")
                 for (line in e.stackTrace) append(line).append("\n")
             },
+            drawStats = GlDrawStats.snapshot(),
         )
         try {
             GlFailureReport.write(context.filesDir, failure)

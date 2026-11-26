@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.AttributeSet
 import android.view.Surface
 import android.view.SurfaceHolder
+import app.dot.Benchmark
 import java.util.concurrent.atomic.AtomicReference
 
 // Dot — the GL picture view (GL-CHAIN-SPEC §9.1, §9.2). A
@@ -150,6 +151,18 @@ class GameGlView @JvmOverloads constructor(
 
     override fun onDrawDurationNanos(nanos: Long) {
         lastDrawNanos = nanos
+    }
+
+    /**
+     * A frame actually drew: tick the benchmark's presented clock
+     * and the live FPS window. Before Phase 1.3 nothing in
+     * production ever called Benchmark.recordPresented, so the
+     * presented stats never ticked, a 600-frame capture could never
+     * complete, and the FPS counter read 0.0 forever (proved on
+     * device: the benchmark sat waiting and never finished).
+     */
+    override fun onFramePresented() {
+        Benchmark.recordPresented()
     }
 
     override fun onChainLabel(label: String) {

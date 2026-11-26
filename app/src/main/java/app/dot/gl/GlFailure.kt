@@ -47,7 +47,14 @@ data class GlFailure(
     val where: String, // "frame" / "layer chain" / "chain", or the fallback's own where
     val program: String,
     val fallbackEngaged: Boolean, // Dot has no fallback — always false until one is added
-    val exceptionText: String // exception type + message + stack trace, verbatim
+    val exceptionText: String, // exception type + message + stack trace, verbatim
+    /**
+     * Draw counts at the moment of failure (GlDrawStats.snapshot):
+     * labelled lines joined with "\n", no trailing newline, empty
+     * when the failure predates the stats. Old reports without the
+     * lines parse back with drawStats = "".
+     */
+    val drawStats: String = "",
 )
 
 /** The failure report: format, parse, store, export (GL-CHAIN-SPEC §9.4). */
@@ -67,6 +74,15 @@ object GlFailureReport {
         sb.appendLine("Where: ${f.where}")
         sb.appendLine("Program: ${f.program}")
         sb.appendLine("Fallback engaged: ${if (f.fallbackEngaged) "yes" else "no"}")
+        // Draw counts, when present: labelled lines before the
+        // blank line, so parse() picks them back up as the extra
+        // fields (see parse). A report without them is the old
+        // format and still parses.
+        if (f.drawStats.isNotEmpty()) {
+            for (line in f.drawStats.lines()) {
+                if (line.isNotEmpty()) sb.appendLine(line)
+            }
+        }
         sb.appendLine()
         sb.append(f.exceptionText)
         val text = sb.toString()
@@ -77,30 +93,49 @@ object GlFailureReport {
      * Parses a report back. Returns null on any corruption (wrong
      * header, missing Time line, missing labelled field, no blank
      * line, blank exception text, or a Fallback-engaged value other
-     * than exactly "yes" or "no").
+     * than exactly "yes" or "no"). The fields are scanned until the
+     * first blank line: the seven original fields are required, and
+     * any further labelled lines are the draw stats, rejoined in
+     * order.
      */
     fun parse(text: String): GlFailure? {
         val lines = text.lines()
         if (lines.isEmpty() || lines[0] != HEADER) return null
-        if (lines.size < 10) return null
+        if (lines.size < 4) return null
         if (!lines[1].startsWith("Time: ") || lines[1].length <= 6) return null
         val fields = mutableMapOf<String, String>()
-        for (i in 2..8) {
+        val extraLines = mutableListOf<String>()
+        var i = 2
+        while (i < lines.size && lines[i].isNotEmpty()) {
             val line = lines[i]
             val colon = line.indexOf(": ")
             if (colon < 0) return null
-            fields[line.substring(0, colon)] = line.substring(colon + 2)
+            val key = line.substring(0, colon)
+            val value = line.substring(colon + 2)
+            if (fields.put(key, value) == null) {
+                extraLines.add(line)
+            } else {
+                // A repeated key is corruption, not a second field.
+                return null
+            }
+            i++
         }
+        if (i >= lines.size) return null // no blank line after the fields
         val required = listOf("App", "Device", "GPU", "Game", "Where", "Program", "Fallback engaged")
         if (!fields.keys.containsAll(required)) return null
-        if (lines[9].isNotEmpty()) return null // the blank line after the fields
-        val exceptionText = lines.drop(10).joinToString("\n")
+        val exceptionText = lines.drop(i + 1).joinToString("\n")
         if (exceptionText.isBlank()) return null
         val fallback = when (fields["Fallback engaged"]) {
             "yes" -> true
             "no" -> false
             else -> return null
         }
+        // The extra lines are the draw stats, in order — everything
+        // that is not one of the seven required fields.
+        val requiredKeys = required.toSet()
+        val drawStats = extraLines
+            .filter { it.substringBefore(": ") !in requiredKeys }
+            .joinToString("\n")
         return GlFailure(
             time = lines[1].substring(6),
             appVersion = fields.getValue("App"),
@@ -110,7 +145,8 @@ object GlFailureReport {
             where = fields.getValue("Where"),
             program = fields.getValue("Program"),
             fallbackEngaged = fallback,
-            exceptionText = exceptionText
+            exceptionText = exceptionText,
+            drawStats = drawStats,
         )
     }
 

@@ -11,8 +11,11 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -538,14 +541,19 @@ internal fun PillControlButton(
     var pressed by remember { mutableStateOf(false) }
     // The placement square is spec.sizeDp on a side; the pill
     // itself is half as tall and sits centred in it, so its centre
-    // lands exactly on the layout fraction.
+    // lands exactly on the layout fraction. The pill's width grows
+    // to fit the label (min the placement size): the old fixed
+    // 64 dp width with 20 dp of horizontal padding left 24 dp for
+    // a 13 sp label, so START / SELECT wrapped and clipped into
+    // unreadable fragments ("CT" / "CEI" on device, Phase 1.2).
     Box(
         modifier = Modifier.size(spec.sizeDp.dp),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .size(spec.sizeDp.dp, (spec.sizeDp / 2).dp)
+                .height((spec.sizeDp / 2).dp)
+                .widthIn(min = spec.sizeDp.dp)
                 .alpha(alpha)
                 .clip(RoundedCornerShape(12.dp))
                 .background(
@@ -556,15 +564,18 @@ internal fun PillControlButton(
                     onDown = { pressed = true; onHold(true) },
                     onUp = { pressed = false; onHold(false) },
                 )
-                .padding(horizontal = 20.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp, vertical = 4.dp),
             contentAlignment = Alignment.Center,
         ) {
             // Label in muted silver-grey; pressed is silver with a
-            // dark label (§4.1).
+            // dark label (§4.1). Single line, never wrapped: the
+            // pill is wide enough to hold it whole.
             Text(
                 label,
                 color = if (pressed) DotSkin.TextOnSilver else DotSkin.TextMuted,
                 fontSize = 13.sp,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }
