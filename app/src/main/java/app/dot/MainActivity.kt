@@ -1,6 +1,5 @@
 package app.dot
 
-import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -30,7 +29,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
@@ -40,7 +38,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -79,18 +76,17 @@ sealed interface DotScreen {
     data class Player(val entry: LibraryEntry, val openEditor: Boolean = false) : DotScreen
     data object Settings : DotScreen
     data object Licences : DotScreen
+    data object Developer : DotScreen
     data object Trace : DotScreen
 
     /** The stack-persistence key (§1.10). The editor flag is
-     *  transient UI state and is deliberately NOT part of the key.
-     *  (Developer joins the stack with the Developer screen in
-     *  batch 5b; a saved "developer" key is dropped as unknown
-     *  until then.) */
+     *  transient UI state and is deliberately NOT part of the key. */
     fun key(): String = when (this) {
         Library -> "library"
         is Player -> "player:${entry.sha256}"
         Settings -> "settings"
         Licences -> "licences"
+        Developer -> "developer"
         Trace -> "trace"
     }
 }
@@ -193,9 +189,17 @@ class MainActivity : ComponentActivity() {
                     )
                     DotScreen.Settings -> SettingsScreen(
                         onBack = { pop() },
+                        onOpenDeveloper = { push(DotScreen.Developer) },
+                        onOpenTrace = { push(DotScreen.Trace) },
+                        onOpenLicences = { push(DotScreen.Licences) },
                     )
                     DotScreen.Licences -> LicencesScreen(
                         onBack = { pop() },
+                    )
+                    DotScreen.Developer -> DeveloperScreen(
+                        entries = library,
+                        onBack = { pop() },
+                        onOpenTrace = { push(DotScreen.Trace) },
                     )
                     DotScreen.Trace -> TraceScreen(
                         traceText = ImportTrace.read(filesDir),
@@ -251,6 +255,7 @@ class MainActivity : ComponentActivity() {
                 key == "library" -> restored.add(DotScreen.Library)
                 key == "settings" -> restored.add(DotScreen.Settings)
                 key == "licences" -> restored.add(DotScreen.Licences)
+                key == "developer" -> restored.add(DotScreen.Developer)
                 key == "trace" -> restored.add(DotScreen.Trace)
                 key.startsWith("player:") -> {
                     val sha = key.removePrefix("player:")
@@ -590,50 +595,6 @@ private fun LibraryScreen(
                 TextButton(onClick = { removeEntry = null }) { Text("Cancel") }
             },
         )
-    }
-}
-
-@Composable
-private fun SettingsScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val prefs = remember {
-        context.getSharedPreferences("dot-settings", Context.MODE_PRIVATE)
-    }
-    var fpsCounter by remember {
-        mutableStateOf(prefs.getBoolean("fps_counter", false))
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Top,
-    ) {
-        Text("Settings", style = MaterialTheme.typography.headlineLarge)
-        Spacer(Modifier.height(24.dp))
-        Text("Display", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("FPS counter")
-            Switch(
-                checked = fpsCounter,
-                onCheckedChange = { checked ->
-                    fpsCounter = checked
-                    prefs.edit().putBoolean("fps_counter", checked).apply()
-                },
-            )
-        }
-        Text(
-            "Shows the live delivered frame rate at the top of the " +
-                "screen while playing. Default off.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Spacer(Modifier.weight(1f))
-        Button(onClick = onBack) { Text("Back") }
     }
 }
 

@@ -47,6 +47,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.dot.gl.GameGlView
+import app.dot.gl.GlFailureReport
 import kotlinx.coroutines.delay
 
 // Dot — the player screen.
@@ -158,10 +159,19 @@ fun GameScreen(
     val rewindVisible = remember {
         prefs.getBoolean("rewind_visible", false)
     }
-    val fpsOn = remember {
-        prefs.getBoolean("fps_counter", false)
+    // FPS counter (§7.1) and the benchmark live line (§7.2),
+    // polled twice a second from the benchmark live summary. The
+    // setting is re-read each tick, so it applies live, not only
+    // on the next launch. While a benchmark capture is running the
+    // benchmark live line takes precedence — the counter hides. The
+    // counter shows nothing until a live summary has landed.
+    var fpsOn by remember {
+        mutableStateOf(prefs.getBoolean("fps_counter", false))
     }
     var liveFps by remember { mutableStateOf(0.0) }
+    var capturing by remember { mutableStateOf(false) }
+    var captureProgress by remember { mutableIntStateOf(0) }
+    var benchStats by remember { mutableStateOf<Benchmark.Stats?>(null) }
 
     // Gamepad (SHELL-SPEC §5): Player 1 only, silent, enabled on
     // entry and cleared on exit. The touch mask and the gamepad
@@ -192,6 +202,7 @@ fun GameScreen(
             context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         session.rumbleGate = vibrator?.let { RumbleGate(it) }
         session.ffSpeed = prefs.getInt("ff_speed", 2).coerceIn(2, 4)
+        session.volumePercent = prefs.getInt("volume", 80).coerceIn(0, 100)
         session.rewindArmed = prefs.getBoolean("rewind_visible", false)
         session.onBenchmarkDone = { capture ->
             val ok = Exports.exportBenchmark(context, capture)
@@ -294,14 +305,14 @@ fun GameScreen(
         }
     }
 
-    // FPS counter: polled twice a second from the benchmark live
-    // summary, exactly like Atomic's. Default OFF.
-    if (fpsOn) {
-        LaunchedEffect(Unit) {
-            while (true) {
-                liveFps = Benchmark.liveFps
-                delay(500)
-            }
+    LaunchedEffect(Unit) {
+        while (true) {
+            fpsOn = prefs.getBoolean("fps_counter", false)
+            liveFps = Benchmark.liveFps
+            capturing = Benchmark.isCapturing()
+            captureProgress = Benchmark.captureProgress()
+            benchStats = Benchmark.liveStats()
+            delay(500)
         }
     }
 
@@ -353,6 +364,13 @@ fun GameScreen(
     // already stopped by the failure callback.
     val glErr = glError
     if (glErr != null) {
+        // The failure report is re-read when the error state
+        // changes, so a failure recorded on the GL thread just
+        // before the error posted is already on file (§10).
+        val glFailure = remember(glErr) {
+            GlFailureReport.read(context.filesDir)
+        }
+        var exportMessage by remember { mutableStateOf<String?>(null) }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -369,6 +387,27 @@ fun GameScreen(
             Spacer(Modifier.height(12.dp))
             Text(glErr, color = Color(0xFFCCCCCC), fontSize = 14.sp)
             Spacer(Modifier.height(24.dp))
+            // Shown ONLY when a report is actually recorded: a
+            // view-creation failure shows this screen too and may
+            // have no GL failure on file, so the button is hidden
+            // then, never a dead button (§10).
+            if (glFailure != null) {
+                Button(
+                    onClick = {
+                        exportMessage = GlFailureReport.export(
+                            context, context.filesDir, glFailure,
+                        )
+                    },
+                ) { Text("Export failure report") }
+                Spacer(Modifier.height(12.dp))
+            }
+            if (exportMessage != null) {
+                Text(exportMessage ?: "", color = Color(0xFFCCCCCC), fontSize = 14.sp)
+                LaunchedEffect(exportMessage) {
+                    delay(3000)
+                    exportMessage = null
+                }
+            }
             Button(onClick = onExit) { Text("Back to library") }
         }
         return
@@ -427,7 +466,28 @@ fun GameScreen(
             isForeground = isForeground,
             isPaused = state == PlayerSession.State.Paused,
         )
-        if (fpsOn && state == PlayerSession.State.Running) {
+        if (capturing && state == PlayerSession.State.Running) {
+            // The benchmark live line (§7.2) takes precedence over
+            // the FPS counter while a capture is running.
+            val stats = benchStats
+            Text(
+                if (stats != null) {
+                    "BENCH $captureProgress/${Benchmark.CAPTURE_FRAMES} · " +
+                        "%.1f fps · p95 %.1f ms · %d drops".format(
+                            stats.avgFps, stats.p95Ms, stats.drops,
+                        )
+                } else {
+                    "BENCH $captureProgress/${Benchmark.CAPTURE_FRAMES} · " +
+                        "waiting for frames"
+                },
+                color = Color.White,
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp),
+            )
+        } else if (fpsOn && liveFps > 0 && state == PlayerSession.State.Running) {
             Text(
                 "%.1f fps".format(liveFps),
                 color = Color.White,
@@ -465,6 +525,8 @@ fun GameScreen(
             onSave = { pickerMode = PickerMode.Save },
             onLoad = { pickerMode = PickerMode.Load },
             onMoveControls = { editorOpen = true },
+            benchmarkRunning = capturing,
+            benchmarkProgress = captureProgress,
             onBenchmark = {
                 session.startBenchmark(glView.chainLabel)
                 session.resume()
@@ -568,7 +630,7 @@ private fun GameArea(glView: GameGlView, modifier: Modifier) {
 }
 
 /** "app.dot 0.1.0-phase0.1 (1)" — the app version for failure reports. */
-private fun appVersionString(context: Context): String {
+internal fun appVersionString(context: Context): String {
     return try {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
         val versionName = info.versionName ?: "unknown"
@@ -592,6 +654,8 @@ private fun PauseMenu(
     onSave: () -> Unit,
     onLoad: () -> Unit,
     onMoveControls: () -> Unit,
+    benchmarkRunning: Boolean,
+    benchmarkProgress: Int,
     onBenchmark: () -> Unit,
     onReport: () -> Unit,
     onExit: () -> Unit,
@@ -613,8 +677,21 @@ private fun PauseMenu(
                 TextButton(onClick = onMoveControls, modifier = Modifier.fillMaxWidth()) {
                     Text("Move controls")
                 }
-                TextButton(onClick = onBenchmark, modifier = Modifier.fillMaxWidth()) {
-                    Text("Start benchmark (600 frames)")
+                // Start is enabled only when no capture is running
+                // (§7.2): exporting while one runs would hand over
+                // the previous capture while the new one records.
+                TextButton(
+                    onClick = onBenchmark,
+                    enabled = !benchmarkRunning,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (benchmarkRunning) {
+                            "Capturing… $benchmarkProgress/${Benchmark.CAPTURE_FRAMES}"
+                        } else {
+                            "Start benchmark (600 frames)"
+                        },
+                    )
                 }
                 TextButton(onClick = onReport, modifier = Modifier.fillMaxWidth()) {
                     Text("Report picture problem")

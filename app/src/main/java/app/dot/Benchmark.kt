@@ -164,7 +164,21 @@ object Benchmark {
         captureGameSha = gameSha
         captureChainLabel = chainLabel
         captureStartedMs = System.currentTimeMillis()
+        // A new capture supersedes the old result.
+        lastCapture = null
         return true
+    }
+
+    /**
+     * Retargets the running capture at another game (the capture
+     * was armed early, before the game started). Only the labels
+     * change — the recorded frames are untouched.
+     */
+    @Synchronized
+    fun retargetCapture(gameSha: String, chainLabel: String) {
+        if (!isCapturing()) return
+        captureGameSha = gameSha
+        captureChainLabel = chainLabel
     }
 
     /** Delivered frames recorded so far in the running capture. */
@@ -219,6 +233,20 @@ object Benchmark {
      *  result for the next launch). */
     fun clearLastCapture() {
         lastCapture = null
+    }
+
+    /**
+     * Test support: clears the clocks, the last capture and the
+     * live window, so tests start from a clean slate. Production
+     * never calls this — a capture start clears the clocks, and a
+     * game stop cancels the running capture.
+     */
+    fun resetForTests() {
+        deliveredClock.capturing = false
+        presentedClock.capturing = false
+        lastCapture = null
+        recentPresented.clear()
+        liveFps = 0.0
     }
 
     /**

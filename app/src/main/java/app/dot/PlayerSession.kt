@@ -114,6 +114,13 @@ class PlayerSession(
     /** Fast-forward multiplier (2, 3 or 4), from the ff_speed pref. */
     @Volatile var ffSpeed = 2
 
+    /**
+     * Audio volume, percent 0–100, from the volume pref. Read once
+     * per game launch by the GameScreen and applied as the track
+     * gain when the audio thread builds its track (§1.3).
+     */
+    @Volatile var volumePercent = 80
+
     /** Rewind capture is armed only while the rewind control is
      *  visible (SHELL-SPEC §6): with the control hidden the
      *  snapshots could never be used. Set by the GameScreen. */
@@ -240,10 +247,11 @@ class PlayerSession(
      *  JOIN_EMU -> JOIN_AUDIO -> WRITE_SAVE -> WRITE_AUTO ->
      *  RELEASE_AUDIO -> UNLOAD_CORE. */
     fun stop() {
-        // Stopping the game cancels any running capture, and the
-        // last capture does not survive into the next launch (§7.2).
+        // Stopping the game cancels any running capture (§7.2). A
+        // finished capture's result stays for the Developer screen
+        // until the next capture starts — only a running capture
+        // (and its stale game title) must not survive.
         Benchmark.cancelCapture()
-        Benchmark.clearLastCapture()
         stopRequested = true
         val token = generation.get()
         val emu = emuThread
@@ -459,7 +467,12 @@ class PlayerSession(
     // -- benchmark -----------------------------------------------------
 
     fun startBenchmark(chainLabel: String) {
-        Benchmark.startCapture(entry.sha256, chainLabel)
+        // A capture armed early (from the Developer screen) is
+        // already running: retarget it at this game instead of
+        // restarting it (§7.2: the game is re-read at finish).
+        if (!Benchmark.startCapture(entry.sha256, chainLabel)) {
+            Benchmark.retargetCapture(entry.sha256, chainLabel)
+        }
     }
 
     /** A copy of the current front frame at 1x, for problem reports. */
@@ -623,6 +636,13 @@ class PlayerSession(
             null
         } ?: return
         audioTrack = track
+        // The volume pref, as a track gain (0–1). A failed set is
+        // ignored — the game plays at full volume instead of
+        // crashing the audio thread.
+        try {
+            track.setVolume(volumePercent.coerceIn(0, 100) / 100f)
+        } catch (e: Exception) {
+        }
         try {
             track.play()
         } catch (e: Exception) {

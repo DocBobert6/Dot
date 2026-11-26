@@ -15,8 +15,7 @@ import org.junit.Test
 class BenchmarkTest {
 
     private fun reset() {
-        Benchmark.cancelCapture()
-        Benchmark.clearLastCapture()
+        Benchmark.resetForTests()
     }
 
     private fun driveFrames(count: Int, intervalNanos: Long, startNanos: Long = 0L) {
