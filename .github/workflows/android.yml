@@ -142,10 +142,24 @@ jobs:
           file "$BRIDGE_SO" | grep -q "ELF 64-bit LSB shared object, ARM aarch64"
           NM="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
           "$NM" -D "$BRIDGE_SO" > bridge-symbols.txt
-          grep -q " T Java_app_dot_Bridge_nativeApiVersion\$" bridge-symbols.txt || {
-            echo "ERROR: bridge is missing Java_app_dot_Bridge_nativeApiVersion" >&2
-            exit 1
-          }
+          # Every JNI function Bridge.kt declares (Phase 1 surface).
+          for sym in Java_app_dot_Bridge_nativeApiVersion \
+            Java_app_dot_Bridge_nativeInit Java_app_dot_Bridge_nativeLoadGame \
+            Java_app_dot_Bridge_nativeGetAvInfo Java_app_dot_Bridge_nativeRunFrame \
+            Java_app_dot_Bridge_nativeGetFrame Java_app_dot_Bridge_nativeReadAudio \
+            Java_app_dot_Bridge_nativeSetAudioDiscard Java_app_dot_Bridge_nativeSetInput \
+            Java_app_dot_Bridge_nativeSetOption Java_app_dot_Bridge_nativeSerializeSize \
+            Java_app_dot_Bridge_nativeSerialize Java_app_dot_Bridge_nativeUnserialize \
+            Java_app_dot_Bridge_nativeSaveRamSize Java_app_dot_Bridge_nativeReadSaveRam \
+            Java_app_dot_Bridge_nativeWriteSaveRam Java_app_dot_Bridge_nativeRtcSize \
+            Java_app_dot_Bridge_nativeReadRtc Java_app_dot_Bridge_nativeWriteRtc \
+            Java_app_dot_Bridge_nativeReadVram Java_app_dot_Bridge_nativeUnloadGame \
+            Java_app_dot_Bridge_nativeDeinit Java_app_dot_Bridge_nativeLastError; do
+            grep -q " T $sym\$" bridge-symbols.txt || {
+              echo "ERROR: bridge is missing $sym" >&2
+              exit 1
+            }
+          done
 
       - name: Stage native libraries into the app
         run: |
