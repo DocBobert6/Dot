@@ -9,6 +9,14 @@
   export (bgCntText)")
 - Licence: MPL-2.0, no Exhibit B notice in src/include (checked
   in CI on every build)
+- blip_buf (LGPL-2.1, plan §1D flag b): NOT shipped. Checked
+  2026-11-26 against the Phase 0 release APK's libmgba_libretro.so
+  (llvm-nm over the full symbol table: zero blip symbols; strings:
+  no blip_buf reference) — the libretro build with
+  -DLIBMGBA_ONLY=ON -DBUILD_LIBRETRO=ON does not link it. No new
+  copy of blip_buf is vendored anywhere in this tree; if a future
+  core change ever pulls it in, that needs an explicit LGPL
+  treatment decision first, not a silent carry-over.
 - Build: `-DLIBMGBA_ONLY=ON -DBUILD_LIBRETRO=ON`, NDK
   27.2.12479018, arm64-v8a, android-21
 - Fork-only core options this app depends on by name (checked in

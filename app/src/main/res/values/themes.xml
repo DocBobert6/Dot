@@ -8,7 +8,7 @@
   depend on — the Compose material3 library carries no XML theme.
   Compose handles in-app theming (see DotTheme in MainActivity);
   this parent only sets the window chrome.
-  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (c) 2026 Dot contributors. All rights reserved.
 -->
 <resources>
     <style name="Theme.Dot" parent="android:Theme.Material.NoActionBar">

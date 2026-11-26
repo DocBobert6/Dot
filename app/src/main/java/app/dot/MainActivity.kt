@@ -56,7 +56,7 @@ import androidx.compose.ui.unit.dp
 // Phase 1: import copies the ROM into filesDir/games/<sha256>.gb,
 // stores the filename stem in the library index from day one (cover
 // matching needs it), and tapping a game opens the player.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 sealed interface DotScreen {
     data object Library : DotScreen

@@ -3,9 +3,9 @@ Dot — Third-Party Notices
 
 Dot itself
 ----------
-Dot is Copyright the Dot contributors.
-Licensed under the GNU General Public License, version 3 (GPL-3.0).
-See LICENSE in the repository root for the full text.
+Dot is Copyright (c) 2026 the Dot contributors. All rights
+reserved. Dot is closed-source software; see LICENSE in the
+repository root. No GPL-licensed code ships in Dot.
 
 mGBA core
 ---------

@@ -1,5 +1,5 @@
 // Dot — app module build file.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 plugins {
     id("com.android.application")

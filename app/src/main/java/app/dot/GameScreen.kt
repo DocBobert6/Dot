@@ -74,7 +74,7 @@ import kotlinx.coroutines.delay
 // No top bar in game. Back toggles pause. The pause menu is Resume
 // first, then Save / Load, then Exit. Save states: 4 manual slots
 // plus Auto (written on pause and on exit, never auto-loaded).
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 @Composable
 fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {

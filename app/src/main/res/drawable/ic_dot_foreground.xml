@@ -2,7 +2,7 @@
 <!--
   Dot — launcher icon foreground: a silver rounded square with one
   dot-matrix dot. The skin's icon, drawn as a vector.
-  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (c) 2026 Dot contributors. All rights reserved.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"

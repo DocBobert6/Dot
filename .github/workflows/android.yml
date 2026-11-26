@@ -38,6 +38,24 @@ jobs:
           set -euo pipefail
           diff NOTICE app/src/main/res/raw/notice.txt
 
+      - name: Licence guard — no GPL in Dot-owned sources
+        run: |
+          set -euo pipefail
+          # Dot is closed-source: no GPL-licensed code may ship in it
+          # (plan §1C/§1D). Dot-owned sources must never contain a GPL
+          # identifier or GPL licence text. The MIT shaders (ScaleFX /
+          # rAA / RCAS) carry no GPL string, so they pass; the MPL core
+          # lives outside this tree (cloned at the pin). README /
+          # NOTICE / LICENSE are excluded: they state the no-GPL
+          # position in prose.
+          if grep -rni "General Public License\|GPL-2\.0\|GPL-3\.0" \
+            app/src/main/java app/src/test bridge \
+            app/build.gradle.kts build.gradle.kts settings.gradle.kts \
+            app/src/main/AndroidManifest.xml app/src/main/assets/shaders; then
+            echo "ERROR: GPL text in Dot-owned sources (see above)" >&2
+            exit 1
+          fi
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:

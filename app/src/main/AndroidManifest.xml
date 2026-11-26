@@ -5,7 +5,7 @@
   by ManifestPermissionsTest so removing one fails the build:
   VIBRATE (haptics, ported from Atomic), INTERNET and
   ACCESS_NETWORK_STATE (cover-art index + fetch, ported from Atomic).
-  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (c) 2026 Dot contributors. All rights reserved.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 

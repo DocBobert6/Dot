@@ -21,7 +21,7 @@ import java.io.File
 //
 // MediaStore (API 29+) needs no permission for files the app creates.
 // Below API 29 the fallback is the app's own external files dir.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object Exports {
 

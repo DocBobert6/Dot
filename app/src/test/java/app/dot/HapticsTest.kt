@@ -16,7 +16,7 @@ import org.robolectric.RobolectricTestRunner
 // reaches the vibrator reports PLAYED, a guard stop reports
 // REJECTED). What the effect feels like is a device verdict, never
 // a test verdict — these tests prove the wiring, not the feel.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class HapticsPureTest {
 

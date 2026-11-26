@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicReference
 // If view creation throws (no GLES 3.0), there is no fallback
 // picture: the host reports the error and the player shows an
 // honest error instead.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class GameGlView @JvmOverloads constructor(
     context: Context,

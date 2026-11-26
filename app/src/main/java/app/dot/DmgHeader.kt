@@ -16,7 +16,7 @@ package app.dot
 // at the GBC app. Every refusal names the failing bytes, so a bad
 // validator is diagnosable instead of silent (the Atomic alpha.1-5
 // lesson).
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object DmgHeader {
 

@@ -12,7 +12,7 @@ package app.dot.gl
 // the renderer's allocation, not here). The pool never hands out a
 // target that is in the caller's [exclude] set (the held deflicker
 // history target, GL-CHAIN-SPEC §7).
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 enum class TargetFilter { NEAREST, LINEAR }
 

@@ -29,7 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 // RELEASE_AUDIO -> UNLOAD_CORE. The core is never unloaded under a
 // live emu thread: if the emu thread will not die, the unload is
 // skipped and the core is left loaded until the process ends.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class PlayerSession(
     private val filesDir: File,

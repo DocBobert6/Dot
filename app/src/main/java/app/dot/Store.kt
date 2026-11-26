@@ -20,7 +20,7 @@ import java.security.MessageDigest
 // Every write goes through atomicWrite: write to a sibling .tmp file
 // and rename, so a kill mid-write never leaves a torn file. A game
 // is identified everywhere by the SHA-256 of its ROM bytes.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 /** One library entry: a game Dot knows about. */
 data class LibraryEntry(

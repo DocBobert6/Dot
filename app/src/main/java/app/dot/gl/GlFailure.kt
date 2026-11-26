@@ -5,7 +5,7 @@ package app.dot.gl
 // an honest error, the report is written, and the benchmark flags
 // the capture (gl_failed) so it can never pass. There is no fallback
 // picture (Atomic alpha.38; Robert's no-fallbacks rule).
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 import android.content.ContentValues
 import android.content.Context

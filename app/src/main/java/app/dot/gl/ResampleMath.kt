@@ -5,7 +5,7 @@ package app.dot.gl
 // are the runtime truth; these functions are what the pure tests
 // run against (and what the host harness uses to check a stage
 // without a GPU).
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object ResampleMath {
 

@@ -14,7 +14,7 @@ precision highp int;
 // the bitmap convention: the uploaded frame's top row is v=0, so the
 // quad's top vertices carry v=0 and its bottom vertices v=1; the
 // flipped screen pass uses the swapped quad.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 in vec4 VertexCoord;
 in vec2 TexCoord;

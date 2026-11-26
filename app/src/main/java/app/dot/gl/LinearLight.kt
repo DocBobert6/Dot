@@ -3,7 +3,7 @@ package app.dot.gl
 // Dot — the sRGB EOTF pair and the palette's linear-light values
 // (GL-CHAIN-SPEC §4.1). All blends and averages in the chain happen in
 // linear light; code values are only for storage and display.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object LinearLight {
     /** sRGB code value in [0,1] -> linear light in [0,1]. */

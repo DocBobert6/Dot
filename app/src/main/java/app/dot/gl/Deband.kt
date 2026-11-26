@@ -28,7 +28,7 @@ package app.dot.gl
 //
 // Documented misses (§4.3.4): diagonal gradients; stacking after
 // dither inversion. Deband runs first, then inversion.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object Deband {
     /**

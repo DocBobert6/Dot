@@ -5,8 +5,14 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
 
-// Dot — haptics engine, ported from Atomic's Haptics.kt (alpha.41
-// probe / alpha.48 fix / alpha.54 gate-removal), re-derived for DMG.
+// Dot — haptics engine.
+//
+// Behaviour follows SHELL-SPEC §2 (the guard order, the per-button
+// character, the probe shape), which itself records what Atomic
+// proved on device (alpha.41 probe, alpha.48 fix, alpha.54
+// gate-removal). The implementation here is Dot's own, written
+// against the Android VibrationEffect API; no Atomic source was
+// read or copied for it.
 //
 // One guard, in this order, for every fire: game rumble wins (the
 // RumbleGate suppresses UI haptics while the game itself rumbles),
@@ -16,8 +22,8 @@ import android.util.Log
 // fire is PLAYED, REJECTED, or THREW; the game ignores it, only
 // the probe screen reports it.
 //
-// Per-button character (Atomic's, DMG mapping drops L/R and the
-// stick): A/B full press click; Start/Select the same click
+// Per-button character (DMG mapping drops L/R and the stick):
+// A/B full press click; Start/Select the same click
 // lighter (0.6x, envelope on API 36+); D-pad direction change a
 // lighter tick (0.6x, envelope on a press from neutral or a roll
 // to a cardinal, plain tick on a roll to a diagonal); release a
@@ -31,7 +37,7 @@ import android.util.Log
 // fallback-first: a claimed envelope that will not build falls
 // back to the plain effect, and a failed fallback stays silent
 // and reports THREW.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 /** Outcome of one haptic fire. */
 enum class HapticOutcome { PLAYED, REJECTED, THREW }

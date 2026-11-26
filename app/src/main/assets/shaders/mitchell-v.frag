@@ -8,7 +8,7 @@ precision highp int;
 // is the horizontal pass's linear-light output), and sRGB-encodes
 // the result at its end so RCAS runs on sRGB. See mitchell-h.frag
 // for the kernel, the negative-lobe note, and the normalisation rule.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 uniform sampler2D Texture;
 uniform vec2 TextureSize;

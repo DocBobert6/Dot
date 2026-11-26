@@ -6,7 +6,7 @@ package app.dot.gl
 // rank>>4, 0..255, one per texel).
 // Uploaded as an R8 texture; the shader maps [0,1] to [-0.5,+0.5]
 // LSB of output dither (GL-CHAIN-SPEC §8.6). Row-major, y=0 first.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 internal val BLUE_NOISE_64: ByteArray = byteArrayOf(
     -98, 78, 14, 116, 95, -90, 125, 24, -33, 85, -65, -30, -109, -80, -51, 68, -13, 1, -67, 108, -29, -54, 4, -81, 125, -66, -15, 117, 37, -58, -39, 105, -97, 36, -59, 8, -75, 108, 79, 24, -63, 13, -48, -123, 30, -24, -45, 42, -54, 14, -20, -67, 48, 100, -71, 43, -11, -99, -73, 53, -108, 127, -34, -62,

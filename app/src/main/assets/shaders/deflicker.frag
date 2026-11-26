@@ -23,7 +23,7 @@ precision highp int;
 // a scrolling periodic background can false-positive (the sustain
 // gate bounds the damage). The device A/B hunts false positives;
 // scroll compensation is Phase 2 work.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 uniform sampler2D Texture;     // current dither-inverted frame (unit 0)
 uniform sampler2D PrevTexture; // previous dither-inverted frame (unit 1)

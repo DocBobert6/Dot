@@ -21,7 +21,7 @@ package app.dot.gl
 // Output: a per-texel blend mask, 0..255 (0 = unblended, 255 = full
 // 0.55/0.45 blend), uploaded as an R8 texture. The shader applies
 // w = 0.45 * m, out = (1 - w) * frame[n] + w * frame[n-1].
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class DeflickerGate {
     private var prev: ByteArray? = null

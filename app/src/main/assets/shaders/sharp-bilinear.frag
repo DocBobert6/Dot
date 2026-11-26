@@ -25,7 +25,7 @@ precision highp int;
 // decodes the selected colour to linear), the single hardware-bilinear
 // tap blends them in linear light, and this pass sRGB-encodes the
 // result at its end. RCAS then runs on sRGB.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 uniform sampler2D Texture;
 uniform vec2 TextureSize;

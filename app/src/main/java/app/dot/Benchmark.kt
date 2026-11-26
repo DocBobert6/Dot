@@ -14,7 +14,7 @@ package app.dot
 // p95 <= 18.0 ms, drops <= 1% over 600 frames, measured on-device.
 // This class only measures; the gate verdict lives in the caller, so
 // a measurement can never be mistaken for a pass.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object Benchmark {
 

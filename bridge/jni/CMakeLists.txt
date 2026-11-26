@@ -14,7 +14,7 @@
 #     -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build-bridge
 #
-# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Dot contributors. All rights reserved.
 
 cmake_minimum_required(VERSION 3.10)
 project(dot-bridge)

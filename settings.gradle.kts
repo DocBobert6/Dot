@@ -1,5 +1,5 @@
 // Dot — standalone Original Game Boy (DMG) remaster app for Android.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 pluginManagement {
     repositories {

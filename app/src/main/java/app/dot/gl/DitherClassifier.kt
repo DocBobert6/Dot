@@ -43,7 +43,7 @@ package app.dot.gl
 // wrong; the k=12 constant even had 13 bits set, so the 75% case
 // could never match. The shader carries the same constants.)
 //
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object DitherClassifier {
     const val WIDTH = ShadePlane.WIDTH

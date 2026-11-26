@@ -18,15 +18,17 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-// Dot — Robolectric startup gate.
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 //
-// The app must launch into the Library with NO native code loaded:
-// Bridge.load() is never called by the UI under test, and the
-// activity only shows the library and licences. If the launch ever
-// regresses — a composable that grew past the verifier, a missing
-// resource, a crash before first frame — this fails in CI instead
-// of on Robert's phone.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Dot — the launch gate: the app must come up on the library screen
+// with no native code loaded at all.
+//
+// Under Robolectric there is no .so to load, so a launch that
+// touches the bridge would fail here instead of on Robert's phone.
+// The gate also pins the two things a launch regression usually
+// breaks first: the activity surviving a configuration change
+// without restarting the session, and the launcher icon still
+// pointing at the supplied artwork.
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MainActivityStartupTest {
@@ -34,49 +36,58 @@ class MainActivityStartupTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
 
+    private fun appContext(): Context =
+        ApplicationProvider.getApplicationContext()
+
     @Test
-    fun launchesAndShowsLibrary() {
+    fun libraryIsTheFirstScreen() {
         composeRule.onNodeWithText("Dot").assertIsDisplayed()
         composeRule.onNodeWithText("Add game").assertIsDisplayed()
-        composeRule.onNodeWithText("No games yet — add a game to start.").assertIsDisplayed()
+        composeRule.onNodeWithText("No games yet — add a game to start.")
+            .assertIsDisplayed()
         composeRule.onNodeWithText("Licences").assertIsDisplayed()
     }
 
     @Test
-    fun licencesScreenShowsNotice() {
+    fun licencesScreenReachesTheNoticeText() {
         composeRule.onAllNodesWithText("Licences")[0].performClick()
         composeRule.onNodeWithText("Mozilla Public License", substring = true)
             .assertIsDisplayed()
     }
 
     @Test
-    fun declaresRequiredConfigChanges() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val info = context.packageManager.getActivityInfo(
-            ComponentName(context, MainActivity::class.java),
+    fun activityHandlesItsOwnConfigChanges() {
+        // The session must survive rotation and window changes in
+        // place: if the activity restarts instead, the game reloads.
+        val info = appContext().packageManager.getActivityInfo(
+            ComponentName(appContext(), MainActivity::class.java),
             PackageManager.GET_META_DATA,
         )
-        val flags = info.configChanges
-        assertTrue("orientation", flags and ActivityInfo.CONFIG_ORIENTATION != 0)
-        assertTrue("screenSize", flags and ActivityInfo.CONFIG_SCREEN_SIZE != 0)
-        assertTrue("screenLayout", flags and ActivityInfo.CONFIG_SCREEN_LAYOUT != 0)
-        assertTrue("keyboardHidden", flags and ActivityInfo.CONFIG_KEYBOARD_HIDDEN != 0)
-        assertTrue(
-            "smallestScreenSize",
-            flags and ActivityInfo.CONFIG_SMALLEST_SCREEN_SIZE != 0,
+        val changes = info.configChanges
+        val required = mapOf(
+            "orientation" to ActivityInfo.CONFIG_ORIENTATION,
+            "screenSize" to ActivityInfo.CONFIG_SCREEN_SIZE,
+            "screenLayout" to ActivityInfo.CONFIG_SCREEN_LAYOUT,
+            "keyboardHidden" to ActivityInfo.CONFIG_KEYBOARD_HIDDEN,
+            "smallestScreenSize" to ActivityInfo.CONFIG_SMALLEST_SCREEN_SIZE,
         )
+        for ((name, flag) in required) {
+            assertTrue(name, changes and flag != 0)
+        }
     }
 
     @Test
-    fun launcherIconIsSuppliedArtwork() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val appInfo = context.packageManager.getApplicationInfo(context.packageName, 0)
+    fun launcherIconIsTheSuppliedArtwork() {
+        val context = appContext()
+        val appInfo = context.packageManager
+            .getApplicationInfo(context.packageName, 0)
         assertEquals(R.mipmap.ic_launcher, appInfo.icon)
     }
 
     @Test
-    fun survivesRecreation() {
+    fun librarySurvivesActivityRecreation() {
         composeRule.activityRule.scenario.recreate()
-        composeRule.onNodeWithText("No games yet — add a game to start.").assertIsDisplayed()
+        composeRule.onNodeWithText("No games yet — add a game to start.")
+            .assertIsDisplayed()
     }
 }

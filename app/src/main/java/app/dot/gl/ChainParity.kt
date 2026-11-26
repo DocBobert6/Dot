@@ -13,7 +13,7 @@ package app.dot.gl
 //   (2) + sharp-bilinear (1) + Mitchell H+V (2, if on)
 //   = 10 / 9 without Mitchell, 12 / 11 with it.
 // The final screen pass flips iff the count is odd.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object ChainParity {
     /** The FBO pass count for a frame with these passes. */

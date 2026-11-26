@@ -8,7 +8,7 @@ import org.junit.Test
 // with an independent copy of the checksum rule, so the validator
 // is checked against the rule as stated in the plan (§1C), not
 // against itself.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class DmgHeaderTest {
 

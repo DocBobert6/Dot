@@ -8,7 +8,7 @@ import org.junit.Test
 
 // Dot — store tests: library index round-trip (including escaped
 // fields), SHA-256 against a known vector, and atomic writes.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class StoreTest {
 

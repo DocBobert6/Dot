@@ -18,7 +18,7 @@ import org.robolectric.annotation.Config
 // to a missing VIBRATE line, and Poing lost a login to a missing
 // INTERNET line. CI's host tests never enforce the manifest, which
 // is how those slipped through.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ManifestPermissionsTest {

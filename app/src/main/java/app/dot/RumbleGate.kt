@@ -25,7 +25,7 @@ import android.os.Vibrator
 // and the gate is always open — the gate costs one JNI call per
 // frame and nothing else. Game rumble is best-effort throughout:
 // a vibrator failure never touches the session.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class RumbleGate(private val vibrator: Vibrator?) {
 

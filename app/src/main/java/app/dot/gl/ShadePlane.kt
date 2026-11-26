@@ -5,7 +5,7 @@ package app.dot.gl
 // frame: each texel maps to its nearest palette shade (0 = white,
 // 3 = black). The hash gates static-frame reuse: a frame whose shade
 // plane hashes the same as the previous frame needs no re-render.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 object ShadePlane {
     const val WIDTH = 160

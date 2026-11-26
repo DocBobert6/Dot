@@ -28,5 +28,7 @@ The release keystore is never in this repo; CI restores it from the
 
 ## Licence
 
-Dot itself is GPL-3.0-or-later (see LICENSE). The mGBA core is
-MPL-2.0 (see NOTICE).
+Dot itself is closed-source (see LICENSE). The mGBA core is
+MPL-2.0 (see NOTICE). No GPL-licensed code ships in Dot: the
+ScaleFX / rAA / RCAS shaders are MIT, the core is MPL-2.0, and
+Dot's own code is proprietary.

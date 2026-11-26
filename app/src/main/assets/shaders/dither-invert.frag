@@ -68,7 +68,7 @@ precision highp int;
 // This shader is mirrored by DitherClassifier.kt (the Kotlin oracle
 // the pure tests run against). The two must implement the same rules;
 // the shader is the runtime truth, the oracle is the test truth.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 uniform sampler2D Texture;
 uniform vec2 TextureSize;

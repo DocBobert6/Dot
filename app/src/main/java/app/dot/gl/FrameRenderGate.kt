@@ -7,7 +7,7 @@ package app.dot.gl
 // rendering (beginRender). Each method returns true iff this call
 // caused a render request. All methods are synchronised; the three
 // booleans are the whole state.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class FrameRenderGate {
     private var frameComplete = false

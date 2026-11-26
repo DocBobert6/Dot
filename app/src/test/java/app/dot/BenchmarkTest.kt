@@ -9,7 +9,7 @@ import org.junit.Test
 // Dot — benchmark tests, with discrimination: the FPS gate must
 // PASS on a clean 600-frame capture at the nominal interval and
 // FAIL on a slow capture, or the gate is not a gate.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class BenchmarkTest {
 

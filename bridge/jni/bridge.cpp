@@ -21,7 +21,7 @@
 // blending are OFF. The low-pass pair is seeded enabled/60 and is
 // driven by the Settings slider (low-pass always on, strength only).
 //
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 #include <jni.h>
 
@@ -274,7 +274,7 @@ static int16_t inputStateCallback(unsigned port, unsigned device,
 static std::atomic<int32_t> g_rumbleStrong{0};
 static std::atomic<int32_t> g_rumbleWeak{0};
 
-static void rumbleCallback(unsigned port, retro_rumble_effect effect,
+static bool rumbleCallback(unsigned port, retro_rumble_effect effect,
                            uint16_t strength) {
     (void)port;
     if (effect == RETRO_RUMBLE_STRONG) {
@@ -282,6 +282,7 @@ static void rumbleCallback(unsigned port, retro_rumble_effect effect,
     } else if (effect == RETRO_RUMBLE_WEAK) {
         g_rumbleWeak.store((int32_t)strength);
     }
+    return true;
 }
 
 // --------------------------------------------------------- environment

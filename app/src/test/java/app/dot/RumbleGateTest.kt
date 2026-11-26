@@ -10,7 +10,7 @@ import org.junit.Test
 // (a rumble-pak game driving the phone vibrator, UI haptics
 // suppressed while it rumbles) is a device verdict, not a test
 // verdict — only Pokemon Pinball exercises it.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class RumbleGateTest {
 

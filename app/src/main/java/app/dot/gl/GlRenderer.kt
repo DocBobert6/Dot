@@ -25,7 +25,7 @@ import javax.microedition.khronos.opengles.GL10
 // A GL failure fails loudly (§9.3): the latch records it, the host
 // is told, the report is written, and the surface clears to
 // charcoal. There is no fallback picture.
-// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Dot contributors. All rights reserved.
 
 /** One frame posted to the renderer: the ARGB pixels, the shade plane, the content hash, and the deflicker mask. */
 data class GlFrame(
