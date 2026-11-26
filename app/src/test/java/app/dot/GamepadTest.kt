@@ -137,18 +137,41 @@ class GamepadTest {
     }
 
     @Test
-    fun motionEventDrivesTheStickMask() {
+    fun motionMaskOrsStickAndHat() {
+        // Stick right + hat down: both feed the same direction bits.
+        val (stick, hat) = Gamepad.motionMask(1f, 0f, 0f, 1f)
+        assertEquals(Bridge.Input.RIGHT, stick)
+        assertEquals(Bridge.Input.DOWN, hat)
+        assertEquals(
+            Bridge.Input.RIGHT or Bridge.Input.DOWN,
+            stick or hat,
+        )
+        // A centred stick and hat count as nothing.
+        val (s2, h2) = Gamepad.motionMask(0f, 0f, 0f, 0f)
+        assertEquals(0, s2 or h2)
+    }
+
+    @Test
+    fun motionEventIsConsumedForJoystickMoves() {
         val pad = Gamepad().apply { enabled = true }
-        var lastMask = -1
-        pad.onMaskChanged = { lastMask = it }
+        // A centred move is still consumed (source + action match);
+        // the mask just stays empty, so no callback fires.
+        var calls = 0
+        pad.onMaskChanged = { calls++ }
         val event = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_MOVE, 0f, 0f, 0)
-            .apply {
-                setSource(InputDevice.SOURCE_JOYSTICK)
-                setAxisValue(MotionEvent.AXIS_X, 1f)
-            }
+            .apply { setSource(InputDevice.SOURCE_JOYSTICK) }
         assertTrue(pad.onMotionEvent(event))
-        assertEquals(Bridge.Input.RIGHT, pad.currentMask())
-        assertEquals(Bridge.Input.RIGHT, lastMask)
+        assertEquals(0, pad.currentMask())
+        assertEquals(0, calls)
+        event.recycle()
+    }
+
+    @Test
+    fun motionEventFallsThroughForOtherSources() {
+        val pad = Gamepad().apply { enabled = true }
+        val event = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_MOVE, 0f, 0f, 0)
+            .apply { setSource(InputDevice.SOURCE_TOUCHSCREEN) }
+        assertFalse(pad.onMotionEvent(event))
         event.recycle()
     }
 

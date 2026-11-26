@@ -88,14 +88,14 @@ class Gamepad {
         }
         if (event.action != MotionEvent.ACTION_MOVE) return false
         val before = currentMask()
-        stickMask = axisMask(
+        val masks = motionMask(
             event.getAxisValue(MotionEvent.AXIS_X),
             event.getAxisValue(MotionEvent.AXIS_Y),
-        )
-        hatMask = axisMask(
             event.getAxisValue(MotionEvent.AXIS_HAT_X),
             event.getAxisValue(MotionEvent.AXIS_HAT_Y),
         )
+        stickMask = masks.first
+        hatMask = masks.second
         if (currentMask() != before) emit()
         return true
     }
@@ -143,6 +143,21 @@ class Gamepad {
                 KeyEvent.KEYCODE_BUTTON_SELECT -> Bridge.Input.SELECT
                 else -> null
             }
+        }
+
+        /**
+         * The stick and hat masks for one motion event, as a pair:
+         * the stick (AXIS_X/Y) and the hat (AXIS_HAT_X/Y) OR into
+         * the same direction bits, so a D-pad that reports as a hat
+         * and a stick that reports as axes agree.
+         */
+        fun motionMask(
+            stickX: Float,
+            stickY: Float,
+            hatX: Float,
+            hatY: Float,
+        ): Pair<Int, Int> {
+            return axisMask(stickX, stickY) to axisMask(hatX, hatY)
         }
 
         /**

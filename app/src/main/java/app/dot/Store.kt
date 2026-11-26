@@ -204,4 +204,41 @@ object Store {
             encodeLibrary(entries).toByteArray(Charsets.UTF_8),
         )
     }
+
+    // -- remove ------------------------------------------------------
+
+    /**
+     * Removes a game and everything that belongs to it: the ROM, its
+     * preset, its manual slots and Auto state, its battery save and
+     * RTC, its fetched/custom/blurred covers, and its control
+     * layout. Returns true when the ROM file itself is gone (the
+     * rest is best-effort — a leftover state file must never block
+     * the removal).
+     */
+    fun removeGame(filesDir: File, sha256: String): Boolean {
+        fun deleteQuietly(file: File) {
+            try {
+                if (file.exists()) file.delete()
+            } catch (_: Exception) {
+            }
+        }
+        val romGone = try {
+            val rom = romFile(filesDir, sha256)
+            if (!rom.exists()) true else rom.delete()
+        } catch (_: Exception) {
+            false
+        }
+        deleteQuietly(Presets.presetFile(filesDir, sha256))
+        for (slot in 0 until 4) {
+            deleteQuietly(stateFile(filesDir, sha256, slot))
+        }
+        deleteQuietly(autoStateFile(filesDir, sha256))
+        deleteQuietly(batterySaveFile(filesDir, sha256))
+        deleteQuietly(rtcFile(filesDir, sha256))
+        deleteQuietly(File(File(filesDir, "covers"), "$sha256.png"))
+        deleteQuietly(File(File(filesDir, "custom-covers"), "$sha256.png"))
+        deleteQuietly(File(File(filesDir, "cover-blurs"), "$sha256.png"))
+        deleteQuietly(LayoutStore.layoutFile(filesDir, sha256))
+        return romGone
+    }
 }
