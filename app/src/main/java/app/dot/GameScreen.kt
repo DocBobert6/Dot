@@ -2,20 +2,14 @@ package app.dot
 
 import android.app.Activity
 import android.content.Context
+import android.os.Vibrator
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-// NOTE: awaitPointerEvent() is a member of the AwaitPointerEventScope
-// receiver inside awaitEachGesture — it takes no import. Importing it
-// from either gestures or ui.input.pointer fails the build (two CI
-// failures, 2026-11-26).
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -23,9 +17,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -110,6 +101,41 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     var pickerMode by remember { mutableStateOf<PickerMode?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val state by session.state.collectAsState()
+    // The resolved control layout (per-game, else the customised
+    // default, else the factory). The layout editor refreshes it.
+    var layout by remember(entry.sha256) {
+        mutableStateOf(LayoutStore.load(context.filesDir, entry.sha256))
+    }
+    // The haptics engine: vibrator + live settings + the rumble
+    // gate, so a UI fire never lands while the game itself rumbles.
+    val haptics = remember(entry.sha256) {
+        val vibrator =
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        HapticsEngine(
+            vibrator = vibrator,
+            settings = {
+                HapticsSettings(
+                    prefs.getBoolean("haptics_enabled", true),
+                    prefs.getInt("haptic_strength", 100),
+                )
+            },
+            isRumbling = { session.rumbleGate?.isRumbling() == true },
+        )
+    }
+    // Rewind hold: while true the emu loop is paused for the hold
+    // and the pause menu stays hidden. The app backgrounding
+    // cancels the hold (the session stays paused, menu shows).
+    var rewindHolding by remember { mutableStateOf(false) }
+    var isForeground by remember { mutableStateOf(true) }
+    val ffVisible = remember {
+        prefs.getBoolean("ff_visible", false)
+    }
+    val slowVisible = remember {
+        prefs.getBoolean("slow_visible", false)
+    }
+    val rewindVisible = remember {
+        prefs.getBoolean("rewind_visible", false)
+    }
     val fpsOn = remember {
         prefs.getBoolean("fps_counter", false)
     }
@@ -118,6 +144,13 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     DisposableEffect(session) {
         session.glFrameSink = { frame -> glView.postFrame(frame) }
         session.onFrame = { glView.onFrameLanded() }
+        // Game rumble (RumbleGate) and the speed / rewind arming the
+        // session needs before the first frame.
+        val vibrator =
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        session.rumbleGate = vibrator?.let { RumbleGate(it) }
+        session.ffSpeed = prefs.getInt("ff_speed", 2).coerceIn(2, 4)
+        session.rewindArmed = prefs.getBoolean("rewind_visible", false)
         session.onBenchmarkDone = { capture ->
             val ok = Exports.exportBenchmark(context, capture)
             message = if (ok) {
@@ -139,14 +172,24 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     }
 
     // Pause when the app backgrounds; the session writes the battery
-    // save and the Auto state on pause.
+    // save and the Auto state asynchronously (backgroundPause). The
+    // pause toggle itself writes neither. Backgrounding also cancels
+    // a rewind hold (the session stays paused, so the menu shows on
+    // return) and drops the haptics lift-off gate.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE &&
-                session.state.value == PlayerSession.State.Running
-            ) {
-                session.pause()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isForeground = true
+                Lifecycle.Event.ON_PAUSE -> {
+                    isForeground = false
+                    haptics.dropReleaseGate()
+                    if (rewindHolding) rewindHolding = false
+                    if (session.state.value == PlayerSession.State.Running) {
+                        session.backgroundPause()
+                    }
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -203,8 +246,16 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     BackHandler {
         when {
             pickerMode != null -> pickerMode = null
+            rewindHolding -> {
+                // Back cancels the rewind hold first.
+                rewindHolding = false
+                session.resume()
+            }
             state == PlayerSession.State.Paused -> session.resume()
-            state == PlayerSession.State.Running -> session.pause()
+            state == PlayerSession.State.Running -> {
+                haptics.dropReleaseGate()
+                session.pause()
+            }
             else -> onExit()
         }
     }
@@ -267,36 +318,34 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     ) {
         val landscape = maxWidth > maxHeight
         if (landscape) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                GameArea(
-                    glView = glView,
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .aspectRatio(10f / 9f),
-                )
-                ControlsArea(
-                    session = session,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                )
-            }
+            GameArea(
+                glView = glView,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(10f / 9f),
+            )
         } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                GameArea(
-                    glView = glView,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(10f / 9f),
-                )
-                ControlsArea(
-                    session = session,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                )
-            }
+            GameArea(
+                glView = glView,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(10f / 9f),
+            )
         }
+        // The touch controls float over the whole screen at their
+        // layout fractions (SHELL-SPEC §3/§4); the layer itself
+        // takes no touches, only the controls do.
+        OverlayControls(
+            session = session,
+            layout = layout,
+            haptics = haptics,
+            ffVisible = ffVisible,
+            slowVisible = slowVisible,
+            rewindVisible = rewindVisible,
+            rewindHolding = rewindHolding,
+            onRewindHolding = { rewindHolding = it },
+            isForeground = isForeground,
+        )
         if (fpsOn && state == PlayerSession.State.Running) {
             Text(
                 "%.1f fps".format(liveFps),
@@ -324,7 +373,10 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
         }
     }
 
-    if (state == PlayerSession.State.Paused) {
+    // The pause menu stays hidden while a rewind hold is live —
+    // the hold pauses the emu loop itself, and the menu would sit
+    // over the game the user is rewinding through.
+    if (state == PlayerSession.State.Paused && !rewindHolding) {
         PauseMenu(
             entry = entry,
             session = session,
@@ -357,22 +409,28 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
             onDismiss = { pickerMode = null },
             onPick = { slot ->
                 pickerMode = null
+                // Save/load run on the session's state-op executor;
+                // the result comes back on the main thread.
                 if (mode == PickerMode.Save) {
-                    message = if (session.saveState(slot)) {
-                        "Saved to slot ${slot + 1}."
-                    } else {
-                        "Save failed."
+                    session.saveState(slot) { ok ->
+                        message = if (ok) {
+                            "Saved to slot ${slot + 1}."
+                        } else {
+                            "Save failed."
+                        }
                     }
                 } else {
-                    val ok = if (slot < 0) {
-                        session.loadAutoState()
-                    } else {
-                        session.loadState(slot)
+                    val done: (Boolean) -> Unit = { ok ->
+                        if (ok) {
+                            session.resume()
+                        } else {
+                            message = "Load failed."
+                        }
                     }
-                    if (ok) {
-                        session.resume()
+                    if (slot < 0) {
+                        session.loadAutoState(done)
                     } else {
-                        message = "Load failed."
+                        session.loadState(slot, done)
                     }
                 }
             },
@@ -411,143 +469,6 @@ private fun appVersionString(context: Context): String {
         "app.dot unknown"
     }
 }
-
-@Composable
-private fun ControlsArea(session: PlayerSession, modifier: Modifier) {
-    var mask by remember { mutableIntStateOf(0) }
-    fun update(bit: Int, down: Boolean) {
-        mask = if (down) mask or bit else mask and bit.inv()
-        session.setInput(mask)
-    }
-    Column(
-        modifier = modifier.padding(16.dp),
-        verticalArrangement = Arrangement.SpaceEvenly,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DPad(onDirection = { bit, down -> update(bit, down) })
-            ABButtons(onButton = { bit, down -> update(bit, down) })
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            SmallButton("SELECT") { down ->
-                update(Bridge.Input.SELECT, down)
-            }
-            SmallButton("START") { down ->
-                update(Bridge.Input.START, down)
-            }
-        }
-    }
-}
-
-@Composable
-private fun DPad(onDirection: (Int, Boolean) -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        PadButton("▲", 64.dp) { down ->
-            onDirection(Bridge.Input.UP, down)
-        }
-        Row {
-            PadButton("◀", 64.dp) { down ->
-                onDirection(Bridge.Input.LEFT, down)
-            }
-            Spacer(Modifier.size(64.dp))
-            PadButton("▶", 64.dp) { down ->
-                onDirection(Bridge.Input.RIGHT, down)
-            }
-        }
-        PadButton("▼", 64.dp) { down ->
-            onDirection(Bridge.Input.DOWN, down)
-        }
-    }
-}
-
-@Composable
-private fun ABButtons(onButton: (Int, Boolean) -> Unit) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RoundButton("B", 72.dp) { down -> onButton(Bridge.Input.B, down) }
-        RoundButton("A", 72.dp) { down -> onButton(Bridge.Input.A, down) }
-    }
-}
-
-@Composable
-private fun PadButton(label: String, size: androidx.compose.ui.unit.Dp, onHold: (Boolean) -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (pressed) Color(0xFF555555) else Color(0xFF2A2A2A))
-            .holdButton(
-                onDown = { pressed = true; onHold(true) },
-                onUp = { pressed = false; onHold(false) },
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = Color.White, fontSize = 20.sp)
-    }
-}
-
-@Composable
-private fun RoundButton(label: String, size: androidx.compose.ui.unit.Dp, onHold: (Boolean) -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(if (pressed) Color(0xFF888888) else Color(0xFF3A3A3A))
-            .holdButton(
-                onDown = { pressed = true; onHold(true) },
-                onUp = { pressed = false; onHold(false) },
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = Color.White, fontSize = 22.sp)
-    }
-}
-
-@Composable
-private fun SmallButton(label: String, onHold: (Boolean) -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (pressed) Color(0xFF555555) else Color(0xFF2A2A2A))
-            .holdButton(
-                onDown = { pressed = true; onHold(true) },
-                onUp = { pressed = false; onHold(false) },
-            )
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = Color.White, fontSize = 13.sp)
-    }
-}
-
-/**
- * Press-and-hold input. The `finally` is load-bearing: without it a
- * gesture cancelled mid-press leaves the button stuck down (an
- * overlay-audit finding in Atomic/Poing).
- */
-private fun Modifier.holdButton(onDown: () -> Unit, onUp: () -> Unit): Modifier =
-    pointerInput(Unit) {
-        awaitEachGesture {
-            awaitFirstDown()
-            onDown()
-            try {
-                do {
-                    val event = awaitPointerEvent()
-                } while (event.changes.any { it.pressed })
-            } finally {
-                onUp()
-            }
-        }
-    }
 
 @Composable
 private fun PauseMenu(

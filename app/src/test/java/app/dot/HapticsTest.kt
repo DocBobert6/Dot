@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 // Dot — haptics engine tests.
 //
@@ -42,11 +43,14 @@ class HapticsPureTest {
     fun oneShotAmplitudeFloorsAtOne() {
         assertEquals(255, HapticsEngine.oneShotAmplitude(100))
         assertEquals(127, HapticsEngine.oneShotAmplitude(50))
-        assertEquals(1, HapticsEngine.oneShotAmplitude(1))
+        // Strength 1 lands at 2 by the arithmetic (1*255/100);
+        // the coerceIn floor of 1 only binds below that.
+        assertEquals(2, HapticsEngine.oneShotAmplitude(1))
     }
 }
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class HapticsEngineTest {
 
     private fun engine(
