@@ -2,10 +2,8 @@ package app.dot
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Bitmap
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -45,19 +43,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import app.dot.gl.GameGlView
 import kotlinx.coroutines.delay
 
 // Dot — the player screen.
@@ -67,10 +65,11 @@ import kotlinx.coroutines.delay
 // supported rotation, not the default: the game area takes the full
 // height and the controls sit to its right.
 //
-// Slice 1 renders the core's frame as a Compose Image from the
-// session's double-buffered bitmap. The GL picture chain (slice 2)
-// replaces this view; the bitmap path stays as the documented
-// fallback when GL is unavailable, exactly as in Atomic.
+// Slice 2 renders the core's frame through the GL picture chain
+// (GameGlView + GlRenderer): deband -> dither-invert -> deflicker
+// -> ScaleFX 3x -> rAA -> sharp-bilinear -> [Mitchell] -> RCAS.
+// There is no bitmap fallback: if GL is unavailable the player
+// shows an honest error (GL-CHAIN-SPEC §9.1).
 //
 // No top bar in game. Back toggles pause. The pause menu is Resume
 // first, then Save / Load, then Exit. Save states: 4 manual slots
@@ -84,18 +83,41 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     val session = remember(entry.sha256) {
         PlayerSession(context.filesDir, entry)
     }
-    var displayed by remember { mutableStateOf(session.currentFrame()) }
+    val prefs = remember {
+        context.getSharedPreferences("dot-settings", Context.MODE_PRIVATE)
+    }
+    val pictureSetting = remember {
+        prefs.getString("picture_target", "auto") ?: "auto"
+    }
+    var glError by remember { mutableStateOf<String?>(null) }
+    val glView = remember(entry.sha256) {
+        GameGlView(
+            context = context,
+            pictureTarget = { pictureSetting },
+            gameTitle = entry.title,
+            appVersion = appVersionString(context),
+            onGlFailed = { _, _, _ ->
+                glError = "The graphics chain failed. See Settings for the failure report."
+                Thread({ session.stop() }, "dot-gl-fail-stop").start()
+            },
+        )
+    }
+    // A view-creation failure (no GLES 3.0) is set synchronously in
+    // the view's init; surface it as the error screen.
+    LaunchedEffect(glView) {
+        glView.glError?.let { glError = it }
+    }
     var pickerMode by remember { mutableStateOf<PickerMode?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val state by session.state.collectAsState()
     val fpsOn = remember {
-        context.getSharedPreferences("dot-settings", Context.MODE_PRIVATE)
-            .getBoolean("fps_counter", false)
+        prefs.getBoolean("fps_counter", false)
     }
     var liveFps by remember { mutableStateOf(0.0) }
 
     DisposableEffect(session) {
-        session.onFrame = { displayed = session.currentFrame() }
+        session.glFrameSink = { frame -> glView.postFrame(frame) }
+        session.onFrame = { glView.onFrameLanded() }
         session.onBenchmarkDone = { capture ->
             val ok = Exports.exportBenchmark(context, capture)
             message = if (ok) {
@@ -111,6 +133,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
         }
         session.start()
         onDispose {
+            session.glFrameSink = null
             Thread({ session.stop() }, "dot-stop").start()
         }
     }
@@ -130,8 +153,10 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Immersive mode, full brightness while playing, and a 59.73 Hz
-    // frame-rate request, all restored when leaving the game.
+    // Immersive mode and full brightness while playing, restored
+    // when leaving the game. The frame rate is requested on the GL
+    // surface itself (GameGlView: Surface.setFrameRate(59.73)), not
+    // via the window attributes.
     DisposableEffect(activity) {
         val window = activity.window
         val insets = WindowCompat.getInsetsController(window, window.decorView)
@@ -142,10 +167,8 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
         insets.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         val oldBrightness = window.attributes.screenBrightness
-        val oldRate = window.attributes.preferredRefreshRate
         window.attributes = window.attributes.apply {
             screenBrightness = 1.0f
-            preferredRefreshRate = 59.73f
         }
         onDispose {
             insets.show(
@@ -154,7 +177,6 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
             )
             window.attributes = window.attributes.apply {
                 screenBrightness = oldBrightness
-                preferredRefreshRate = oldRate
             }
         }
     }
@@ -212,6 +234,32 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
         else -> Unit
     }
 
+    // A GL failure (no GLES 3.0, or the chain latched): an honest
+    // error, not a picture (GL-CHAIN-SPEC §9.1). The session is
+    // already stopped by the failure callback.
+    val glErr = glError
+    if (glErr != null) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF141414))
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "The graphics chain failed.",
+                color = Color.White,
+                fontSize = 18.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(glErr, color = Color(0xFFCCCCCC), fontSize = 14.sp)
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onExit) { Text("Back to library") }
+        }
+        return
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -221,7 +269,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
         if (landscape) {
             Row(modifier = Modifier.fillMaxSize()) {
                 GameArea(
-                    bitmap = displayed,
+                    glView = glView,
                     modifier = Modifier
                         .fillMaxHeight()
                         .aspectRatio(10f / 9f),
@@ -236,7 +284,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
                 GameArea(
-                    bitmap = displayed,
+                    glView = glView,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(10f / 9f),
@@ -284,7 +332,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
             onSave = { pickerMode = PickerMode.Save },
             onLoad = { pickerMode = PickerMode.Load },
             onBenchmark = {
-                session.startBenchmark("bitmap-1x")
+                session.startBenchmark(glView.chainLabel)
                 session.resume()
                 message = "Benchmark running — 600 frames."
             },
@@ -335,17 +383,32 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
 private enum class PickerMode { Save, Load }
 
 @Composable
-private fun GameArea(bitmap: Bitmap, modifier: Modifier) {
+private fun GameArea(glView: GameGlView, modifier: Modifier) {
     Box(
         modifier = modifier.background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = "Game",
-            contentScale = ContentScale.FillBounds,
+        AndroidView(
+            factory = { glView },
             modifier = Modifier.fillMaxSize(),
         )
+    }
+}
+
+/** "app.dot 0.1.0-phase0.1 (1)" — the app version for failure reports. */
+private fun appVersionString(context: Context): String {
+    return try {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        val versionName = info.versionName ?: "unknown"
+        val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        "app.dot $versionName ($versionCode)"
+    } catch (_: Exception) {
+        "app.dot unknown"
     }
 }
 

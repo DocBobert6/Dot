@@ -28,3 +28,18 @@ Kotlin and AndroidX runtime
 The Kotlin standard library and AndroidX libraries are licensed under
 the Apache License, version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
+
+ScaleFX and rAA shaders
+-----------------------
+The ScaleFX 3x and rAA (reverse antialiasing) shaders are
+Copyright (c) 2016 Sp00kyFox - ScaleFX@web.de (ScaleFX) and
+Copyright (c) 2018 Sp00kyFox - ScaleFX@web.de (rAA), licensed
+under the MIT License. The full MIT text is in the shader files
+(app/src/main/assets/shaders/scalefx-pass*.frag and
+raa-pass*.frag).
+
+RCAS shader
+-----------
+The RCAS (Robust Contrast Adaptive Sharpening) shader is ported
+from https://www.shadertoy.com/view/stXSWB, MIT License.
+The full MIT text is in app/src/main/assets/shaders/rcas.frag.

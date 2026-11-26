@@ -6,6 +6,10 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
+import app.dot.gl.DeflickerGate
+import app.dot.gl.FrameHash
+import app.dot.gl.GlFrame
+import app.dot.gl.ShadePlane
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -67,6 +71,14 @@ class PlayerSession(
 
     /** Called on the main thread after each delivered frame. */
     var onFrame: (() -> Unit)? = null
+
+    /** The GL frame sink (the GameGlView): receives each emulated
+     *  frame's ARGB pixels, shade plane, content hash, and deflicker
+     *  mask. Set by the GameScreen; null when no GL view is attached. */
+    var glFrameSink: ((GlFrame) -> Unit)? = null
+
+    /** The gated flicker-transparency gate (GL-CHAIN-SPEC §7). */
+    private val deflickerGate = DeflickerGate()
 
     /** Set when a benchmark capture finishes. */
     var onBenchmarkDone: ((Benchmark.Capture) -> Unit)? = null
@@ -314,6 +326,17 @@ class PlayerSession(
                         0, 0, Bridge.FRAME_WIDTH, Bridge.FRAME_HEIGHT,
                     )
                     frontIsA = !frontIsA
+                }
+                // The GL frame: the shade plane, its content hash
+                // (static-frame reuse), and the deflicker mask from
+                // the gate. Posted to the view's holder (emu thread);
+                // the view's gate requests exactly one render.
+                val sink = glFrameSink
+                if (sink != null) {
+                    val shades = ShadePlane.fromArgb(backPixels)
+                    val hash = FrameHash.fnv1a64(shades)
+                    val mask = deflickerGate.update(shades)
+                    sink(GlFrame(backPixels.copyOf(), shades, hash, mask))
                 }
                 Benchmark.recordDelivered(frameStart)
                 mainHandler.post { onFrame?.invoke() }
