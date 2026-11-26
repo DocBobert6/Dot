@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import app.dot.gl.GlFailureReport
 import java.io.File
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // Copyright (c) 2026 Dot contributors. All rights reserved.
 //
@@ -49,12 +50,12 @@ import kotlinx.coroutines.delay
 // The screen uses status-bar padding (bars visible — §11).
 //
 // Sections: Display, Audio, Controls (with the Test haptics probe
-// and the Default layout editor), Storage, Crash report, Graphics
-// failure report, Developer, About. (Cover art joins it with the
-// cover-art work in batch 6.)
+// and the Default layout editor), Cover art, Storage, Crash
+// report, Graphics failure report, Developer, About.
 
 @Composable
 fun SettingsScreen(
+    coverRepository: CoverRepository,
     onBack: () -> Unit,
     onOpenDeveloper: () -> Unit,
     onOpenTrace: () -> Unit,
@@ -101,6 +102,16 @@ fun SettingsScreen(
     var rewindVisible by remember {
         mutableStateOf(prefs.getBoolean("rewind_visible", false))
     }
+    // Cover art (§1.2). The fetch toggle closes the fetch gate
+    // when off; the library re-reads both toggles live on entry
+    // (never freeze them in a remembered snapshot).
+    var coverArtEnabled by remember {
+        mutableStateOf(prefs.getBoolean("cover_art_enabled", true))
+    }
+    var coverArtMobileData by remember {
+        mutableStateOf(prefs.getBoolean("cover_art_mobile_data", false))
+    }
+    val refreshScope = androidx.compose.runtime.rememberCoroutineScope()
     // The probe engine: the identical construction to the game's
     // (same vibrator, same live settings), so a probe fire is the
     // game's fire (§2.1). Nothing rumbles outside a game.
@@ -320,6 +331,90 @@ fun SettingsScreen(
                 },
             ) { Text("Reset controls") }
         }
+
+        // -- Cover art (§1.2) --------------------------------------
+        SectionHeader("Cover art")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Fetch cover art")
+            Switch(
+                checked = coverArtEnabled,
+                onCheckedChange = { enabled ->
+                    coverArtEnabled = enabled
+                    prefs.edit().putBoolean("cover_art_enabled", enabled).apply()
+                    coverRepository.onFetchToggleChanged()
+                },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Fetch over mobile data")
+            Switch(
+                checked = coverArtMobileData,
+                onCheckedChange = { enabled ->
+                    coverArtMobileData = enabled
+                    prefs.edit()
+                        .putBoolean("cover_art_mobile_data", enabled).apply()
+                    coverRepository.onFetchToggleChanged()
+                },
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        val indexState = coverRepository.indexState
+        Text(
+            when (indexState) {
+                is CoverRepository.IndexState.Ready -> {
+                    val source = if (indexState.fromCache) {
+                        "refreshed copy"
+                    } else {
+                        "bundled"
+                    }
+                    "GB index: ${indexState.entries} entries · " +
+                        "snapshot ${indexState.snapshotDate} · $source"
+                }
+                is CoverRepository.IndexState.Failed ->
+                    "GB index: refresh failed (${indexState.reason})"
+                is CoverRepository.IndexState.Loading ->
+                    "GB index: refreshing…"
+                is CoverRepository.IndexState.NotLoaded ->
+                    "GB index: not loaded"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(8.dp))
+        val gate = CoverGate.gateFor(
+            CoverGate.readFacts(context),
+            coverArtMobileData,
+        )
+        Text(
+            if (!coverArtEnabled) {
+                "Fetching paused: cover art is off"
+            } else if (gate.gate == CoverGate.Gate.OPEN) {
+                when (gate.label) {
+                    "Wi-Fi OK" -> "Fetching over Wi-Fi"
+                    "Mobile data OK" -> "Fetching over mobile data"
+                    else -> "Fetching over an unmetered connection"
+                }
+            } else {
+                "Fetching paused: ${gate.label}"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = {
+                refreshScope.launch {
+                    notice = coverRepository.refreshIndex(manual = true)
+                }
+            },
+            enabled = indexState !is CoverRepository.IndexState.Loading,
+        ) { Text("Refresh index") }
 
         // -- Default layout (§1.4, §3.4) -----------------------------
         SectionHeader("Default layout")

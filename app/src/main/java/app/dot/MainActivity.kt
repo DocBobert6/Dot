@@ -11,8 +11,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,7 +23,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -38,8 +43,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -118,10 +126,23 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var pickGame: ActivityResultLauncher<String>
 
+    /** The cover-art repository (SHELL-SPEC §8): app-scoped, so
+     *  pipelines survive navigation to Settings or the player. */
+    private lateinit var coverRepository: CoverRepository
+
+    /** The game a custom-cover pick is for (§8.5). */
+    private var customCoverSha: String? = null
+    private lateinit var pickCustomCover: ActivityResultLauncher<String>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // The crash handler goes first (§9), next to the trace init.
         CrashReport.install(filesDir)
         super.onCreate(savedInstanceState)
+        val prefs = getSharedPreferences("dot-settings", MODE_PRIVATE)
+        coverRepository = CoverRepository(
+            applicationContext, filesDir, prefs, CoverBitmaps::decode,
+        )
+        coverRepository.start()
         reloadLibrary()
         stack = restoreStack(
             savedInstanceState?.getStringArrayList(NAV_STACK_KEY),
@@ -132,6 +153,39 @@ class MainActivity : ComponentActivity() {
                 "No file picked."
             } else {
                 importGame(uri)
+            }
+        }
+        // The custom-cover picker (§8.5): the system photo picker.
+        // The picked bytes are capped at 16 MB; on failure nothing
+        // is written and the previous cover stays.
+        pickCustomCover = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            val sha = customCoverSha
+            customCoverSha = null
+            message = if (uri == null || sha == null) {
+                "No cover picked."
+            } else {
+                val bytes = try {
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        val buffer = ByteArray(CoverRepository.CUSTOM_PICK_CAP_BYTES + 1)
+                        var read = 0
+                        while (read <= CoverRepository.CUSTOM_PICK_CAP_BYTES) {
+                            val n = input.read(buffer, read, buffer.size - read)
+                            if (n < 0) break
+                            read += n
+                        }
+                        buffer.copyOf(read)
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+                when {
+                    bytes == null -> "Could not read that image."
+                    bytes.size > CoverRepository.CUSTOM_PICK_CAP_BYTES ->
+                        "That image is too large (over 16 MB)."
+                    coverRepository.setCustomCover(sha, bytes) ->
+                        "Custom cover set."
+                    else -> "Could not use that image."
+                }
             }
         }
         setContent {
@@ -166,6 +220,7 @@ class MainActivity : ComponentActivity() {
                         entries = library,
                         presets = presets,
                         message = message,
+                        coverRepository = coverRepository,
                         onAddGame = { pickGame.launch("*/*") },
                         onOpenGame = { entry ->
                             push(DotScreen.Player(entry))
@@ -179,6 +234,21 @@ class MainActivity : ComponentActivity() {
                         onRemove = { entry ->
                             removeGame(entry)
                         },
+                        onSetCustomCover = { entry ->
+                            customCoverSha = entry.sha256
+                            pickCustomCover.launch("image/*")
+                        },
+                        onRemoveCustomCover = { entry ->
+                            coverRepository.removeCustomCover(entry.sha256)
+                            message = "Custom cover removed."
+                        },
+                        onRetryCoverDownload = { entry ->
+                            coverRepository.retryOne(entry.sha256)
+                            message = "Retrying cover download."
+                        },
+                        onRetryFailedCovers = {
+                            coverRepository.retryAll()
+                        },
                         onSettings = { push(DotScreen.Settings) },
                         onLicences = { push(DotScreen.Licences) },
                     )
@@ -188,6 +258,7 @@ class MainActivity : ComponentActivity() {
                         startWithEditorOpen = current.openEditor,
                     )
                     DotScreen.Settings -> SettingsScreen(
+                        coverRepository = coverRepository,
                         onBack = { pop() },
                         onOpenDeveloper = { push(DotScreen.Developer) },
                         onOpenTrace = { push(DotScreen.Trace) },
@@ -212,6 +283,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        coverRepository.stop()
+        super.onDestroy()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -240,6 +316,9 @@ class MainActivity : ComponentActivity() {
     private fun reloadLibrary() {
         library = Store.loadLibrary(filesDir)
         presets = library.associate { it.sha256 to Presets.load(filesDir, it.sha256) }
+        if (::coverRepository.isInitialized) {
+            coverRepository.setGames(library)
+        }
     }
 
     /**
@@ -339,6 +418,9 @@ class MainActivity : ComponentActivity() {
                 val sha = Store.sha256Hex(bytes)
                 val existing = library.any { it.sha256 == sha }
                 if (existing) {
+                    // A re-import clears that game's attempt record
+                    // only (§8.4) — the rename and layout are kept.
+                    coverRepository.clearAttemptRecord(sha)
                     ImportTrace.append(filesDir, "Duplicate: ${verdict.title} is already in the library.")
                     return "${verdict.title} is already in your library."
                 }
@@ -422,16 +504,40 @@ private fun DotTheme(content: @Composable () -> Unit) {
     )
 }
 
+/**
+ * The full name a tile shows (§12.2): (1) the rename, (2) the
+ * cover-art index title, (3) the filename stem, (4) the header
+ * title. (The tray redesign and blurred wash are out of slice 3
+ * scope; thumbnails in the existing rows are in.)
+ */
+private fun libraryDisplayName(
+    entry: LibraryEntry,
+    preset: Presets.GamePreset,
+    coverRepository: CoverRepository?,
+): String {
+    val rename = preset.rename?.takeIf { it.isNotBlank() }
+    if (rename != null) return rename
+    val matched = coverRepository?.titleFor(entry.sha256)
+    if (matched != null) return matched
+    if (entry.sourceName.isNotBlank()) return entry.sourceName
+    return entry.title
+}
+
 @Composable
 private fun LibraryScreen(
     entries: List<LibraryEntry>,
     presets: Map<String, Presets.GamePreset>,
     message: String?,
+    coverRepository: CoverRepository,
     onAddGame: () -> Unit,
     onOpenGame: (LibraryEntry) -> Unit,
     onMoveControls: (LibraryEntry) -> Unit,
     onRename: (LibraryEntry, String) -> Unit,
     onRemove: (LibraryEntry) -> Unit,
+    onSetCustomCover: (LibraryEntry) -> Unit,
+    onRemoveCustomCover: (LibraryEntry) -> Unit,
+    onRetryCoverDownload: (LibraryEntry) -> Unit,
+    onRetryFailedCovers: () -> Unit,
     onSettings: () -> Unit,
     onLicences: () -> Unit,
 ) {
@@ -460,6 +566,29 @@ private fun LibraryScreen(
             Spacer(Modifier.height(16.dp))
             Text(message)
         }
+        // The cover-art status line (§8.5), above the list: derived
+        // from the same map the tiles read, so the two never
+        // disagree. Auto-hides after 4 s unless fetching, a
+        // failure, or a Missing game. A Retry button sits beside it
+        // whenever there is a failure.
+        if (coverRepository.statusVisible) {
+            Spacer(Modifier.height(16.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    coverRepository.statusLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                if (coverRepository.hasFailure) {
+                    TextButton(onClick = onRetryFailedCovers) {
+                        Text("Retry")
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(16.dp))
         if (entries.isEmpty()) {
             Text("No games yet — add a game to start.")
@@ -469,11 +598,13 @@ private fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(entries, key = { it.sha256 }) { entry ->
-                    val displayName = Presets.displayName(
+                    val displayName = libraryDisplayName(
                         entry,
                         presets[entry.sha256] ?: Presets.GamePreset(),
+                        coverRepository,
                     )
-                    Column(
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
                             .combinedClickable(
@@ -482,15 +613,19 @@ private fun LibraryScreen(
                             )
                             .padding(vertical = 8.dp),
                     ) {
-                        Text(
-                            displayName,
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            entry.sourceName +
-                                if (entry.dualMode) " · dual-mode, DMG mode" else "",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        CoverThumb(entry, coverRepository)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                displayName,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                entry.sourceName +
+                                    if (entry.dualMode) " · dual-mode, DMG mode" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 }
             }
@@ -502,14 +637,18 @@ private fun LibraryScreen(
         }
     }
 
-    // Long-press menu (§12.2): Rename, Move controls, Remove.
-    // (Set custom cover and Retry cover download join it with the
-    // cover-art work in batch 6.)
+    // Long-press menu (§12.2): Rename, Move controls, Remove, and
+    // the cover-art entries — Set custom cover (always), Remove
+    // custom cover (only when one exists), Retry cover download
+    // (only on a Failed tile).
     menuEntry?.let { entry ->
-        val displayName = Presets.displayName(
+        val displayName = libraryDisplayName(
             entry,
             presets[entry.sha256] ?: Presets.GamePreset(),
+            coverRepository,
         )
+        val coverState = coverRepository.states[entry.sha256]
+        val hasCustom = coverRepository.hasCustomCover(entry.sha256)
         AlertDialog(
             onDismissRequest = { menuEntry = null },
             title = { Text(displayName) },
@@ -530,6 +669,31 @@ private fun LibraryScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Move controls") }
+                    TextButton(
+                        onClick = {
+                            menuEntry = null
+                            onSetCustomCover(entry)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Set custom cover") }
+                    if (hasCustom) {
+                        TextButton(
+                            onClick = {
+                                menuEntry = null
+                                onRemoveCustomCover(entry)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Remove custom cover") }
+                    }
+                    if (coverState is CoverRepository.CoverState.Failed) {
+                        TextButton(
+                            onClick = {
+                                menuEntry = null
+                                onRetryCoverDownload(entry)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Retry cover download") }
+                    }
                     TextButton(
                         onClick = {
                             menuEntry = null
@@ -570,9 +734,10 @@ private fun LibraryScreen(
     }
 
     removeEntry?.let { entry ->
-        val displayName = Presets.displayName(
+        val displayName = libraryDisplayName(
             entry,
             presets[entry.sha256] ?: Presets.GamePreset(),
+            coverRepository,
         )
         AlertDialog(
             onDismissRequest = { removeEntry = null },
@@ -595,6 +760,49 @@ private fun LibraryScreen(
                 TextButton(onClick = { removeEntry = null }) { Text("Cancel") }
             },
         )
+    }
+}
+
+/**
+ * The tile thumbnail (§8.5): the cover when Ready (decoded on
+ * demand from the file, via the 8-entry LRU keyed by path +
+ * last-modified), else the generated-label placeholder. The tile
+ * touches the file when it shows it, so the LRU treats it as
+ * recently shown.
+ */
+@Composable
+private fun CoverThumb(
+    entry: LibraryEntry,
+    coverRepository: CoverRepository,
+) {
+    val state = coverRepository.states[entry.sha256]
+    val ready = state as? CoverRepository.CoverState.Ready
+    val bitmap = remember(ready?.file) {
+        ready?.let { CoverBitmaps.decodeFile(it.file) }
+    }
+    LaunchedEffect(bitmap) {
+        if (bitmap != null) coverRepository.touchShown(entry.sha256)
+    }
+    Box(
+        modifier = Modifier
+            .size(64.dp)
+            .background(Color(0xFF1A1A1A)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text(
+                text = entry.title.firstOrNull()?.toString() ?: "?",
+                color = Color(0xFFFFFFFF),
+                style = MaterialTheme.typography.titleLarge,
+            )
+        }
     }
 }
 
