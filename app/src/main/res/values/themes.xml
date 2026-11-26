@@ -2,14 +2,18 @@
 <!--
   Dot — theme. Silver and black, bright and sharp: silver faceplate
   chrome, near-black charcoal base, white text.
+  Parent is the PLATFORM Material theme, not Theme.Material3:
+  Theme.Material3.DayNight.NoActionBar lives in the Views Material
+  library (com.google.android.material:material), which Dot does not
+  depend on — the Compose material3 library carries no XML theme.
+  Compose handles in-app theming (see DotTheme in MainActivity);
+  this parent only sets the window chrome.
   SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <resources>
-    <style name="Theme.Dot" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#1A1A1A</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorPrimaryContainer">#C0C0C0</item>
-        <item name="colorOnPrimaryContainer">#1A1A1A</item>
+    <style name="Theme.Dot" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#1A1A1A</item>
+        <item name="android:navigationBarColor">#1A1A1A</item>
         <item name="android:statusBarColor">#1A1A1A</item>
     </style>
 </resources>

@@ -17,6 +17,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,7 +71,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent {
-            MaterialTheme {
+            DotTheme {
                 when (val current = screen) {
                     DotScreen.Library -> LibraryScreen(
                         message = importMessage,
@@ -111,6 +113,24 @@ class MainActivity : ComponentActivity() {
             is DmgHeader.Verdict.Refused -> verdict.reason
         }
     }
+}
+
+// Dot's in-app theme: silver and black, per the decided skin.
+// Charcoal is the primary (near-black base), silver the container
+// (faceplate chrome), white the text on charcoal.
+@Composable
+private fun DotTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = lightColorScheme(
+            primary = Color(0xFF1A1A1A),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFC0C0C0),
+            onPrimaryContainer = Color(0xFF1A1A1A),
+            background = Color(0xFFFFFFFF),
+            onBackground = Color(0xFF1A1A1A),
+        ),
+        content = content,
+    )
 }
 
 @Composable
