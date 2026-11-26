@@ -646,7 +646,7 @@ private fun LibraryScreen(
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
-                                    .fillMaxSize()
+                                    .matchParentSize()
                                     .alpha(0.35f),
                             )
                         }
