@@ -79,12 +79,21 @@ object DitherClassifier {
     fun classify(g: IntArray, x: Int, y: Int): Int {
         val self = g[y * WIDTH + x]
         // 2x2 checker (both phases), the most common family, first.
+        // If the pattern matches, the field gate decides; if it fails,
+        // the diagonal run is tried before giving up on this texel
+        // (the diagonal shares the 2x2 pattern and replacement — it
+        // is a separate field test, not a separate family).
         val c2 = matchChecker2x2(g, x and 1.inv(), y and 1.inv())
         if (c2 != null) {
             val (a, b, _) = c2
-            if (fieldGate(g, F_CHECKER2X2, x and 1.inv(), y and 1.inv(), 2, 2, a, b) &&
-                baselineGate(g, x and 1.inv(), y and 1.inv(), a, b)
+            val ox = x and 1.inv()
+            val oy = y and 1.inv()
+            if (fieldGate(g, F_CHECKER2X2, ox, oy, 2, 2, a, b) &&
+                baselineGate(g, ox, oy, a, b)
             ) {
+                return LinearLight.averageShade(a, b, 0.5f)
+            }
+            if (diagonalRun(g, ox, oy, a, b) && baselineGate(g, ox, oy, a, b)) {
                 return LinearLight.averageShade(a, b, 0.5f)
             }
             return self
@@ -158,15 +167,6 @@ object DitherClassifier {
         if (hl != null) {
             val (a, b, _) = hl
             if (baselineGate(g, x, y, a, b)) {
-                return LinearLight.averageShade(a, b, 0.5f)
-            }
-            return self
-        }
-        // Diagonal staircase (the run is the field evidence).
-        val dg = matchDiagonal(g, x, y)
-        if (dg != null) {
-            val (a, b, _) = dg
-            if (baselineGate(g, x and 1.inv(), y and 1.inv(), a, b)) {
                 return LinearLight.averageShade(a, b, 0.5f)
             }
             return self
@@ -403,16 +403,13 @@ object DitherClassifier {
     }
 
     /**
-     * Diagonal staircase: from the centre 2x2 checker block, count
+     * Diagonal staircase run test (the 2x2 checker's alternate field
+     * evidence). From the centre 2x2 checker block at (ox, oy), count
      * the run of consecutive checker blocks along each diagonal
      * (phase must flip every step). True when either diagonal run
-     * is >= 3 blocks. Returns (A, B, 0.5).
+     * is >= 3 blocks. Mirrors the shader's diagonalRun.
      */
-    fun matchDiagonal(g: IntArray, x: Int, y: Int): Triple<Int, Int, Float>? {
-        val ox = x and 1.inv()
-        val oy = y and 1.inv()
-        val c = matchChecker2x2(g, ox, oy) ?: return null
-        val (a, b, _) = c
+    fun diagonalRun(g: IntArray, ox: Int, oy: Int, a: Int, b: Int): Boolean {
         // Phase of the centre block: top-left == A means phase 0.
         val phase0 = if (shadeAt(g, ox, oy) == a) 0 else 1
         // Directions: (1,1) and (1,-1), in block steps of 2 texels.
@@ -434,9 +431,9 @@ object DitherClassifier {
                     expectPhase = 1 - expectPhase
                 }
             }
-            if (run >= 3) return c
+            if (run >= 3) return true
         }
-        return null
+        return false
     }
 
     // ---- gates ----

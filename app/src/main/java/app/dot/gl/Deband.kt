@@ -31,7 +31,21 @@ package app.dot.gl
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 object Deband {
-    private const val MIN_BANDS = 5
+    /**
+     * Minimum bands in a step sequence (conjunct 2).
+     *
+     * SPEC CORRECTION (2026-11-26): GL-CHAIN-SPEC §4.3.1 says ">= 5
+     * consecutive bands", inherited from Atomic's 8-bit detector —
+     * but with only 4 shades that is UNREACHABLE. Bands are maximal
+     * runs of one shade, so consecutive bands always differ, and a
+     * monotone sequence of distinct shades 0..3 has at most 4 bands
+     * (0,1,2,3). The spec's own examples are 3 bands (0 -> 1 -> 2)
+     * and 4 bands (3 -> 2 -> 1 -> 0), both with span >= 2 — so the
+     * correct Dot value is 3. (The spec's note that "a 5-band
+     * sequence necessarily repeats shades" cannot hold for maximal
+     * runs: two adjacent runs of the same shade would merge.)
+     */
+    private const val MIN_BANDS = 3
     private const val MIN_SPAN = 2
     private const val MIN_LINES = 16
     private const val MIN_AREA = 1_000

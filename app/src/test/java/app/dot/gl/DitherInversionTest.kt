@@ -252,9 +252,12 @@ class DitherInversionTest {
         val p = blank(0)
         stampTile3x3(p, 66, 66, 12, 12, 3, 0)
         passingBaseline(p, 72, 72, 3, 0)
-        // The centre tile has 5 dark (corners + centre) of 9 -> 5/9.
+        // The test texel (74,74) sits where the overlapping 2x2 cell
+        // is all shade 3 (not a checker), so the 2x2 branch does not
+        // claim it and the 3x3 branch fires. The tile has 5 dark
+        // (corners + centre) of 9 -> 5/9.
         // lin = (5/9)*0 + (4/9)*1.0 = 0.4444 -> encode -> 178.
-        assertEquals(178, DitherClassifier.classify(p, 72, 72))
+        assertEquals(178, DitherClassifier.classify(p, 74, 74))
     }
 
     // ---- Bayer 4x4 ----
@@ -327,8 +330,10 @@ class DitherInversionTest {
 
     @Test
     fun shortLineRunDoesNotMatch() {
-        // Only 3 alternating columns — under the >= 4 run.
-        val p = blank(0)
+        // Only 3 alternating columns — under the >= 4 run. The fill
+        // is shade 1, deliberately NOT in the line pair (3,0), so the
+        // run cannot extend into the background.
+        val p = blank(1)
         for (x in 70 until 73) {
             for (y in 68 until 76) {
                 setShade(p, x, y, if (x % 2 == 0) 3 else 0)
