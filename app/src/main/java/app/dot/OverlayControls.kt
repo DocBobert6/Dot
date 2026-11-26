@@ -77,23 +77,25 @@ fun OverlayControls(
     ffVisible: Boolean,
     slowVisible: Boolean,
     rewindVisible: Boolean,
+    /** The touch mask portion, owned by the player screen. */
+    touchMask: Int,
+    /** Fires when the touch mask portion changes; the player screen
+     *  merges it with the gamepad mask before the session. */
+    onTouchMaskChanged: (Int) -> Unit,
     rewindHolding: Boolean,
-    onRewindHolding: (Boolean) -> Unit,
+    onRewindStart: () -> Unit,
+    onRewindEnd: () -> Unit,
     isForeground: Boolean,
     isPaused: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    // One shared input mask: each control owns its bits, the overlay
-    // merges them and pushes the result (store-only — the session's
-    // emu loop is the single pusher to the core). The push fires
-    // only when the mask actually changes (C10 #5).
-    var mask by remember { mutableIntStateOf(0) }
+    // Each control owns its bits; the overlay merges them into the
+    // touch mask portion and reports it up (the session's emu loop
+    // is the single pusher to the core). The report fires only when
+    // the mask actually changes (C10 #5).
     fun updateBits(bits: Int, value: Int) {
-        val next = (mask and bits.inv()) or (value and bits)
-        if (next != mask) {
-            mask = next
-            session.setInput(mask)
-        }
+        val next = (touchMask and bits.inv()) or (value and bits)
+        if (next != touchMask) onTouchMaskChanged(next)
     }
 
     val inputEnabled = layout.opacity > 0
@@ -261,17 +263,10 @@ fun OverlayControls(
                     onHold = { down ->
                         if (down) {
                             haptics.utilityClick()
-                            // The emu loop must be stopped before the
-                            // first unserialise, or a frame in flight
-                            // races it. The pause menu stays hidden
-                            // while the hold is live (rewindHolding).
-                            haptics.dropReleaseGate()
-                            session.pause()
-                            onRewindHolding(true)
+                            onRewindStart()
                         } else {
                             haptics.utilityReleaseTick()
-                            onRewindHolding(false)
-                            session.resume()
+                            onRewindEnd()
                         }
                     },
                 )

@@ -142,6 +142,26 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     }
     var liveFps by remember { mutableStateOf(0.0) }
 
+    // Gamepad (SHELL-SPEC §5): Player 1 only, silent, enabled on
+    // entry and cleared on exit. The touch mask and the gamepad
+    // mask merge here, before the session — the session's setInput
+    // stores the merged mask, and the emu loop stays the single
+    // pusher to the core.
+    val gamepad = remember(entry.sha256) { Gamepad() }
+    var touchMask by remember { mutableIntStateOf(0) }
+    var gamepadMask by remember { mutableIntStateOf(0) }
+    fun pushMergedMask() {
+        session.setInput(touchMask or gamepadMask)
+    }
+    // Every pause path clears the held touch mask, the pad state,
+    // the stick state and the stored session mask (set to 0) — so
+    // no button can stick across a pause (§5).
+    fun clearAllInput() {
+        touchMask = 0
+        gamepad.clear()
+        session.setInput(0)
+    }
+
     DisposableEffect(session) {
         session.glFrameSink = { frame -> glView.postFrame(frame) }
         session.onFrame = { glView.onFrameLanded() }
@@ -172,6 +192,25 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
         }
     }
 
+    // The gamepad handler lives on the activity: installed on
+    // player entry, cleared on exit. The callback merges the pad
+    // mask with the touch mask and pushes the result to the session.
+    DisposableEffect(gamepad) {
+        val mainActivity = activity as MainActivity
+        mainActivity.gamepadHandler = gamepad
+        gamepad.onMaskChanged = { mask ->
+            gamepadMask = mask
+            pushMergedMask()
+        }
+        gamepad.enabled = true
+        onDispose {
+            gamepad.enabled = false
+            gamepad.onMaskChanged = null
+            gamepad.clear()
+            mainActivity.gamepadHandler = null
+        }
+    }
+
     // Pause when the app backgrounds; the session writes the battery
     // save and the Auto state asynchronously (backgroundPause). The
     // pause toggle itself writes neither. Backgrounding also cancels
@@ -187,6 +226,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
                     haptics.dropReleaseGate()
                     if (rewindHolding) rewindHolding = false
                     if (session.state.value == PlayerSession.State.Running) {
+                        clearAllInput()
                         session.backgroundPause()
                     }
                 }
@@ -255,6 +295,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
             state == PlayerSession.State.Paused -> session.resume()
             state == PlayerSession.State.Running -> {
                 haptics.dropReleaseGate()
+                clearAllInput()
                 session.pause()
             }
             else -> onExit()
@@ -343,8 +384,25 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
             ffVisible = ffVisible,
             slowVisible = slowVisible,
             rewindVisible = rewindVisible,
+            touchMask = touchMask,
+            onTouchMaskChanged = { mask ->
+                touchMask = mask
+                pushMergedMask()
+            },
             rewindHolding = rewindHolding,
-            onRewindHolding = { rewindHolding = it },
+            onRewindStart = {
+                // The emu loop must be stopped before the first
+                // unserialise, or a frame in flight races it. The
+                // pause menu stays hidden while the hold is live.
+                haptics.dropReleaseGate()
+                clearAllInput()
+                session.pause()
+                rewindHolding = true
+            },
+            onRewindEnd = {
+                rewindHolding = false
+                session.resume()
+            },
             isForeground = isForeground,
             isPaused = state == PlayerSession.State.Paused,
         )
@@ -412,9 +470,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     if (editorOpen) {
         LayoutEditor(
             baseLayout = layout,
-            resetTarget = LayoutStore.effectiveDefault(
-                context.filesDir, entry.sha256,
-            ),
+            resetTarget = LayoutStore.effectiveDefault(context.filesDir),
             haptics = haptics,
             ffVisible = ffVisible,
             slowVisible = slowVisible,

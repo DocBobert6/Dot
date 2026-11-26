@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
@@ -74,7 +76,28 @@ class MainActivity : ComponentActivity() {
 
     private var library by mutableStateOf<List<LibraryEntry>>(emptyList())
 
+    /**
+     * The gamepad currently driving the player (SHELL-SPEC §5), or
+     * null outside the player. The player screen installs it on
+     * entry and clears it on exit, so the pad never hijacks keys on
+     * the library or settings screens.
+     */
+    var gamepadHandler: Gamepad? = null
+
     private lateinit var pickGame: ActivityResultLauncher<String>
+
+    // Activity-level key/motion dispatch: a consumed gamepad event
+    // never reaches the views. The gamepad itself decides what it
+    // consumes (mapped gamepad buttons only; Back never swallowed).
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        gamepadHandler?.let { if (it.onKeyEvent(event)) return true }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        gamepadHandler?.let { if (it.onMotionEvent(event)) return true }
+        return super.onGenericMotionEvent(event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

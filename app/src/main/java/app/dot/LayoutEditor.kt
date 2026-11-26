@@ -105,11 +105,13 @@ fun LayoutEditor(
 
             // Safe-area bounds, read once per composition: the
             // maximum inset per edge, as fractions — never tighter
-            // than the 0.03 screen clamp.
-            val insets = remember(density, layoutDirection) {
-                val cutout = WindowInsets.displayCutout.asPaddingValues()
-                val nav = WindowInsets.navigationBars.asPaddingValues()
-                val status = WindowInsets.statusBars.asPaddingValues()
+            // than the 0.03 screen clamp. asPaddingValues() is a
+            // @Composable call, so it runs in the composition body,
+            // not inside the remember lambda.
+            val cutout = WindowInsets.displayCutout.asPaddingValues()
+            val nav = WindowInsets.navigationBars.asPaddingValues()
+            val status = WindowInsets.statusBars.asPaddingValues()
+            val insets = remember(cutout, nav, status, layoutDirection) {
                 fun left(p: androidx.compose.foundation.layout.PaddingValues): Dp =
                     p.calculateLeftPadding(layoutDirection)
                 fun right(p: androidx.compose.foundation.layout.PaddingValues): Dp =
