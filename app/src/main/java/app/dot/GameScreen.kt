@@ -9,7 +9,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.input.pointer.awaitPointerEvent
+// NOTE: awaitPointerEvent() is a member of the AwaitPointerEventScope
+// receiver inside awaitEachGesture — it takes no import. Importing it
+// from either gestures or ui.input.pointer fails the build (two CI
+// failures, 2026-11-26).
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
