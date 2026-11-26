@@ -403,19 +403,22 @@ class CoverRepository(
         if (queue.isEmpty()) return
         // Children of this coroutine (the pipeline job), NOT of the
         // repository scope: parking the pipeline cancels them, so
-        // no download lands after the gate closed.
-        val jobs = queue.map { entry ->
-            launch {
-                downloadSlots.withPermit {
-                    fetchOne(entry)
+        // no download lands after the gate closed. Each child's
+        // failure is caught inside it, so one game's failure never
+        // cancels its siblings.
+        kotlinx.coroutines.coroutineScope {
+            for (entry in queue) {
+                launch {
+                    try {
+                        downloadSlots.withPermit {
+                            fetchOne(entry)
+                        }
+                    } catch (_: Exception) {
+                        // A cancelled job is a park, not a failure;
+                        // any other failure is already recorded per
+                        // game by fetchOne.
+                    }
                 }
-            }
-        }
-        for (job in jobs) {
-            try {
-                job.join()
-            } catch (_: Exception) {
-                // A cancelled job is a park, not a failure.
             }
         }
         enforceLruCap()
@@ -482,7 +485,9 @@ class CoverRepository(
         }
         if (!written) return failGame(sha, "could not save")
         // A fetch cancelled by a park must not publish after it.
-        if (!kotlinx.coroutines.currentCoroutineContext().isActive) return
+        // (The file stays on disk; the next classify finds it and
+        // publishes Ready then.)
+        kotlinx.coroutines.currentCoroutineContext()[Job]?.ensureActive()
         setState(sha, CoverState.Ready(cover, false))
         updateStatus()
     }
