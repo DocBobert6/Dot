@@ -7,6 +7,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -86,28 +89,23 @@ class CoverRepository(
         data class Failed(val reason: String) : IndexState
     }
 
-    var states: Map<String, CoverState> by
-        androidx.compose.runtime.mutableStateOf(emptyMap())
+    var states: Map<String, CoverState> by mutableStateOf(emptyMap())
         private set
 
-    var indexState: IndexState by
-        androidx.compose.runtime.mutableStateOf(IndexState.NotLoaded)
+    var indexState: IndexState by mutableStateOf(IndexState.NotLoaded)
         private set
 
-    var statusLine: String by
-        androidx.compose.runtime.mutableStateOf("")
+    var statusLine: String by mutableStateOf("")
         private set
 
     /** True while the status line must stay visible (fetching, a
      *  failure, or a Missing game). Otherwise it auto-hides after
      *  4 s. */
-    var statusVisible: Boolean by
-        androidx.compose.runtime.mutableStateOf(false)
+    var statusVisible: Boolean by mutableStateOf(false)
         private set
 
     /** True while there is a failure to retry (index or game). */
-    var hasFailure: Boolean by
-        androidx.compose.runtime.mutableStateOf(false)
+    var hasFailure: Boolean by mutableStateOf(false)
         private set
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -403,8 +401,11 @@ class CoverRepository(
                     ))
         }
         if (queue.isEmpty()) return
+        // Children of this coroutine (the pipeline job), NOT of the
+        // repository scope: parking the pipeline cancels them, so
+        // no download lands after the gate closed.
         val jobs = queue.map { entry ->
-            scope.launch {
+            launch {
                 downloadSlots.withPermit {
                     fetchOne(entry)
                 }
@@ -433,12 +434,16 @@ class CoverRepository(
         setState(sha, CoverState.Loading)
         updateStatus()
         val index = this.index ?: return failGame(sha, "no index")
-        val art = CoverMatcher.matchBest(
-            outerStem = entry.sourceName,
-            innerStem = "",
-            headerTitle = entry.title,
+        // Match inputs in order: the filename stem, then the
+        // header title. Dot imports single files only (no zips),
+        // so there is no inner stem. The denylist stays empty for
+        // Dot (it fires only on the header path).
+        val art = CoverMatcher.match(
+            inputs = listOf(
+                CoverMatcher.MatchInput(entry.sourceName, isHeader = false),
+                CoverMatcher.MatchInput(entry.title, isHeader = true),
+            ),
             artFilenames = index.entries,
-            denylist = CoverMatcher.DENYLIST,
         ) ?: run {
             attempts = attempts.copy(
                 noMatch = attempts.noMatch + (
@@ -476,6 +481,8 @@ class CoverRepository(
             false
         }
         if (!written) return failGame(sha, "could not save")
+        // A fetch cancelled by a park must not publish after it.
+        if (!kotlinx.coroutines.currentCoroutineContext().isActive) return
         setState(sha, CoverState.Ready(cover, false))
         updateStatus()
     }
