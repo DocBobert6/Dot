@@ -45,7 +45,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -486,19 +488,26 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Dot's in-app theme: silver and black, per the decided skin.
-// Charcoal is the primary (near-black base), silver the container
-// (faceplate chrome), white the text on charcoal.
+// Dot's in-app theme: silver and black, per the decided skin
+// (GB-PLAN §2, §7.8). Silver is the primary (faceplate chrome),
+// charcoal the base, white the text on charcoal. Buttons read as
+// chrome: silver fill, dark text. No indigo anywhere.
 @Composable
 private fun DotTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
-            primary = Color(0xFF1A1A1A),
-            onPrimary = Color(0xFFFFFFFF),
-            primaryContainer = Color(0xFFC0C0C0),
-            onPrimaryContainer = Color(0xFF1A1A1A),
-            background = Color(0xFFFFFFFF),
-            onBackground = Color(0xFF1A1A1A),
+            primary = DotSkin.Silver,
+            onPrimary = DotSkin.TextOnSilver,
+            primaryContainer = DotSkin.SilverLight,
+            onPrimaryContainer = DotSkin.TextOnSilver,
+            secondary = DotSkin.Steel,
+            onSecondary = DotSkin.TextOnSilver,
+            background = DotSkin.Charcoal,
+            onBackground = DotSkin.TextWhite,
+            surface = DotSkin.CharcoalDeep,
+            onSurface = DotSkin.TextWhite,
+            surfaceVariant = DotSkin.ControlDark,
+            onSurfaceVariant = DotSkin.TextMuted,
         ),
         content = content,
     )
@@ -555,7 +564,12 @@ private fun LibraryScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.Top,
     ) {
-        Text("Dot", style = MaterialTheme.typography.headlineLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Dot", style = MaterialTheme.typography.headlineLarge)
+            Spacer(Modifier.width(10.dp))
+            // The power light: the only green in the app.
+            PowerLight()
+        }
         Text(
             "Original Game Boy, remastered",
             style = MaterialTheme.typography.bodyMedium,
@@ -603,28 +617,58 @@ private fun LibraryScreen(
                         presets[entry.sha256] ?: Presets.GamePreset(),
                         coverRepository,
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    // A DMG cart in a vertical tray (§7.8 item 6):
+                    // a silver cart body, the cover as its label,
+                    // the full name in dark text on the silver, and
+                    // the blurred cover wash behind the label.
+                    val coverState = coverRepository.states[entry.sha256]
+                    val coverReady =
+                        coverState as? CoverRepository.CoverState.Ready
+                    val coverBitmap = remember(coverReady?.file) {
+                        coverReady?.let { CoverBitmaps.decodeFile(it.file) }
+                    }
+                    val wash = remember(coverBitmap) {
+                        coverBitmap?.let { CoverBitmaps.blurredWash(it) }
+                    }
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DotSkin.Silver)
                             .combinedClickable(
                                 onClick = { onOpenGame(entry) },
                                 onLongClick = { menuEntry = entry },
-                            )
-                            .padding(vertical = 8.dp),
+                            ),
                     ) {
-                        CoverThumb(entry, coverRepository)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                displayName,
-                                style = MaterialTheme.typography.titleMedium,
+                        if (wash != null) {
+                            Image(
+                                bitmap = wash.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .alpha(0.35f),
                             )
-                            Text(
-                                entry.sourceName +
-                                    if (entry.dualMode) " · dual-mode, DMG mode" else "",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(10.dp),
+                        ) {
+                            CoverThumb(entry, coverRepository)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    displayName,
+                                    color = DotSkin.TextOnSilver,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    entry.sourceName +
+                                        if (entry.dualMode) " · dual-mode, DMG mode" else "",
+                                    color = DotSkin.TextMutedOnSilver,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         }
                     }
                 }
@@ -786,7 +830,7 @@ private fun CoverThumb(
     Box(
         modifier = Modifier
             .size(64.dp)
-            .background(Color(0xFF1A1A1A)),
+            .background(DotSkin.CharcoalDeep),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
@@ -799,7 +843,7 @@ private fun CoverThumb(
         } else {
             Text(
                 text = entry.title.firstOrNull()?.toString() ?: "?",
-                color = Color(0xFFFFFFFF),
+                color = DotSkin.TextWhite,
                 style = MaterialTheme.typography.titleLarge,
             )
         }

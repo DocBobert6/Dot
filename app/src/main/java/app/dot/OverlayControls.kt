@@ -373,17 +373,18 @@ private fun mergedDirs(pointers: Map<PointerId, Offset>, half: Float): Int {
     return mask
 }
 
-/** The cross itself (§4.1): a flat charcoal well with indigo arms;
- *  a held arm brightens to full indigo. */
+/** The cross itself (§4.1): a silver well with a charcoal cross —
+ *  the DMG's own D-pad, dark on the silver faceplate; a held arm
+ *  brightens to near-white. */
 @Composable
 private fun CrossCanvas(activeDirs: Int, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val s = size.minDimension
         val arm = s * 0.36f
         val r = s * 0.10f
-        val well = Color(0xFF1E1E1E)
-        val armRest = Color(0xFF44448A)
-        val armLit = Color(0xFF5B5BD6)
+        val well = DotSkin.Silver
+        val armRest = DotSkin.CharcoalDeep
+        val armLit = DotSkin.SilverBright
         fun armColor(bit: Int) = if (activeDirs and bit != 0) armLit else armRest
         // The well behind the cross.
         drawRoundRect(
@@ -425,7 +426,8 @@ private fun CrossCanvas(activeDirs: Int, modifier: Modifier = Modifier) {
             size = Size((s - arm) / 2f, arm),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
         )
-        // Direction triangles, one at the end of each arm.
+        // Direction triangles, one at the end of each arm —
+        // charcoal on the silver well.
         val tri = s * 0.10f
         val cx = s / 2f
         fun triangle(tip: Offset, left: Offset, right: Offset) {
@@ -436,7 +438,7 @@ private fun CrossCanvas(activeDirs: Int, modifier: Modifier = Modifier) {
                     lineTo(right.x, right.y)
                     close()
                 },
-                color = Color(0xFFCCCCCC),
+                color = DotSkin.CharcoalDeep,
             )
         }
         val upY = s * 0.07f
@@ -476,16 +478,20 @@ internal fun RoundControlButton(
     enabled: Boolean,
     labelSize: TextUnit = 22.sp,
     active: Boolean = false,
-    /** FF / 0.5x / RW render as muted indigo-grey circles (§4.1). */
+    /** FF / 0.5x / RW render as muted steel-dark circles (§4.1). */
     utility: Boolean = false,
     onHold: (Boolean) -> Unit,
 ) {
     var pressed by remember { mutableStateOf(false) }
-    val indigo = Color(0xFF5B5BD6)
+    // Silver fill when pressed or active, charcoal otherwise;
+    // utility (FF / 0.5x / RW) renders as a muted steel-dark
+    // circle (§4.1). The label is dark on silver, white on
+    // charcoal.
+    val silver = DotSkin.Silver
     val fill = when {
-        pressed || active -> indigo
-        utility -> Color(0xFF3A3A55)
-        else -> Color(0xFF2A2A2A)
+        pressed || active -> silver
+        utility -> Color(0xFF3A3A3A)
+        else -> DotSkin.ControlDark
     }
     Box(
         modifier = Modifier
@@ -493,12 +499,12 @@ internal fun RoundControlButton(
             .alpha(alpha)
             .clip(CircleShape)
             .background(fill)
-            // A/B carry a thin indigo ring; pressed is solid indigo.
+            // A/B carry a thin silver ring; pressed is solid silver.
             .then(
                 if (!utility && !pressed && !active) {
                     Modifier.border(
                         width = 1.5.dp,
-                        color = indigo.copy(alpha = 0.7f),
+                        color = silver.copy(alpha = 0.7f),
                         shape = CircleShape,
                     )
                 } else {
@@ -514,7 +520,7 @@ internal fun RoundControlButton(
     ) {
         Text(
             label,
-            color = Color.White,
+            color = if (pressed || active) DotSkin.TextOnSilver else Color.White,
             fontSize = labelSize,
             fontWeight = FontWeight.Bold,
         )
@@ -543,7 +549,7 @@ internal fun PillControlButton(
                 .alpha(alpha)
                 .clip(RoundedCornerShape(12.dp))
                 .background(
-                    if (pressed) Color(0xFF5B5BD6) else Color(0xFF2A2A2A),
+                    if (pressed) DotSkin.Silver else DotSkin.ControlDark,
                 )
                 .holdButton(
                     enabled = enabled,
@@ -553,11 +559,11 @@ internal fun PillControlButton(
                 .padding(horizontal = 20.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center,
         ) {
-            // Label in muted indigo-grey; pressed is indigo with a
-            // white label (§4.1).
+            // Label in muted silver-grey; pressed is silver with a
+            // dark label (§4.1).
             Text(
                 label,
-                color = if (pressed) Color.White else Color(0xFF9A9AC2),
+                color = if (pressed) DotSkin.TextOnSilver else DotSkin.TextMuted,
                 fontSize = 13.sp,
             )
         }

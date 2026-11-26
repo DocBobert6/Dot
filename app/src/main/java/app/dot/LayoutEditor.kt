@@ -93,7 +93,7 @@ fun LayoutEditor(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF141414).copy(alpha = 0.92f)),
+            .background(DotSkin.Charcoal.copy(alpha = 0.92f)),
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val density = LocalDensity.current
@@ -217,7 +217,7 @@ fun LayoutEditor(
                         .size(spec.sizeDp.dp)
                         .border(
                             width = if (selected) 2.dp else 0.dp,
-                            color = if (selected) Color(0xFF5B5BD6)
+                            color = if (selected) DotSkin.Silver
                             else Color.Transparent,
                             shape = RoundedCornerShape(8.dp),
                         )
@@ -385,7 +385,7 @@ fun LayoutEditor(
                             "${hidden.joinToString(" / ")} $verb hidden in " +
                                 "play — turn $obj on in Settings → " +
                                 "Controls to move $obj.",
-                            color = Color(0xFFCCCCCC),
+                            color = DotSkin.TextMuted,
                             fontSize = 13.sp,
                             modifier = Modifier.padding(top = 8.dp),
                         )
@@ -414,10 +414,14 @@ private fun EditorPill(
         modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
             .background(
-                if (active) Color(0xFF5B5BD6) else Color(0xFF2A2A2A),
+                if (active) DotSkin.Silver else DotSkin.ControlDark,
             ),
     ) {
-        Text(label, color = Color.White, fontSize = 13.sp)
+        Text(
+            label,
+            color = if (active) DotSkin.TextOnSilver else Color.White,
+            fontSize = 13.sp,
+        )
     }
 }
 

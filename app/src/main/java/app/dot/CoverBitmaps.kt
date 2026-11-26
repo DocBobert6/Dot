@@ -105,6 +105,54 @@ object CoverBitmaps {
         cache.clear()
     }
 
+    /**
+     * A blurred wash of [bitmap] for the tray-cart background
+     * (§7.8 item 6): downscaled to 32x32, then two passes of a
+     * 3x3 box blur. The caller draws it cropped and dimmed
+     * behind the label; the blur itself is real, not a scrim.
+     * The source bitmap is never modified or recycled.
+     */
+    fun blurredWash(bitmap: Bitmap): Bitmap {
+        val small = Bitmap.createScaledBitmap(bitmap, 32, 32, true)
+        val once = boxBlur(small)
+        small.recycle()
+        val twice = boxBlur(once)
+        once.recycle()
+        return twice
+    }
+
+    private fun boxBlur(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        val out = IntArray(w * h)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                var r = 0
+                var g = 0
+                var b = 0
+                var n = 0
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        val xx = (x + dx).coerceIn(0, w - 1)
+                        val yy = (y + dy).coerceIn(0, h - 1)
+                        val p = pixels[yy * w + xx]
+                        r += (p shr 16) and 0xFF
+                        g += (p shr 8) and 0xFF
+                        b += p and 0xFF
+                        n++
+                    }
+                }
+                out[y * w + x] =
+                    (0xFF shl 24) or ((r / n) shl 16) or ((g / n) shl 8) or (b / n)
+            }
+        }
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(out, 0, w, 0, 0, w, h)
+        return result
+    }
+
     private fun isPngOrJpeg(bytes: ByteArray): Boolean {
         if (bytes.size >= 8 &&
             bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() &&

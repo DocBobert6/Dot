@@ -7,11 +7,14 @@ import android.os.Looper
 import android.os.Vibrator
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -34,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -179,6 +185,22 @@ fun GameScreen(
         mutableStateOf(prefs.getBoolean("fps_counter", false))
     }
     var liveFps by remember { mutableStateOf(0.0) }
+
+    // The dot-matrix boot gesture (§7.8 item 5): Dot's own mark
+    // when a game launches — short, non-blocking. The session runs
+    // underneath; the mark holds ~650 ms, then fades in 250 ms.
+    // Per game entry, so a fresh launch boots again; a resume
+    // from pause does not.
+    var bootDone by remember(entry.sha256) { mutableStateOf(false) }
+    val bootAlpha by animateFloatAsState(
+        targetValue = if (bootDone) 0f else 1f,
+        animationSpec = tween(durationMillis = 250),
+        label = "dot-boot",
+    )
+    LaunchedEffect(entry.sha256) {
+        delay(650)
+        bootDone = true
+    }
     var capturing by remember { mutableStateOf(false) }
     var captureProgress by remember { mutableIntStateOf(0) }
     var benchStats by remember { mutableStateOf<Benchmark.Stats?>(null) }
@@ -349,7 +371,7 @@ fun GameScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF141414))
+                    .background(DotSkin.Charcoal)
                     .padding(24.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -360,7 +382,7 @@ fun GameScreen(
                     fontSize = 18.sp,
                 )
                 Spacer(Modifier.height(12.dp))
-                Text(s.message, color = Color(0xFFCCCCCC), fontSize = 14.sp)
+                Text(s.message, color = DotSkin.TextMuted, fontSize = 14.sp)
                 Spacer(Modifier.height(24.dp))
                 Button(onClick = onExit) { Text("Back to library") }
             }
@@ -384,7 +406,7 @@ fun GameScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF141414))
+                .background(DotSkin.Charcoal)
                 .padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -395,7 +417,7 @@ fun GameScreen(
                 fontSize = 18.sp,
             )
             Spacer(Modifier.height(12.dp))
-            Text(glErr, color = Color(0xFFCCCCCC), fontSize = 14.sp)
+            Text(glErr, color = DotSkin.TextMuted, fontSize = 14.sp)
             Spacer(Modifier.height(24.dp))
             // Shown ONLY when a report is actually recorded: a
             // view-creation failure shows this screen too and may
@@ -412,7 +434,7 @@ fun GameScreen(
                 Spacer(Modifier.height(12.dp))
             }
             if (exportMessage != null) {
-                Text(exportMessage ?: "", color = Color(0xFFCCCCCC), fontSize = 14.sp)
+                Text(exportMessage ?: "", color = DotSkin.TextMuted, fontSize = 14.sp)
                 LaunchedEffect(exportMessage) {
                     delay(3000)
                     exportMessage = null
@@ -426,7 +448,7 @@ fun GameScreen(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF141414)),
+            .background(DotSkin.Charcoal),
     ) {
         val landscape = maxWidth > maxHeight
         if (landscape) {
@@ -520,6 +542,22 @@ fun GameScreen(
             LaunchedEffect(message) {
                 delay(4000)
                 message = null
+            }
+        }
+        // The boot mark, on top of everything while it lasts.
+        // No pointer handling: touches pass straight through to
+        // the controls underneath.
+        if (bootAlpha > 0.01f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(DotSkin.Charcoal)
+                    .alpha(bootAlpha),
+                contentAlignment = Alignment.Center,
+            ) {
+                DotMatrixMark(
+                    modifier = Modifier.size(220.dp, 90.dp),
+                )
             }
         }
     }
@@ -672,7 +710,14 @@ private fun PauseMenu(
 ) {
     AlertDialog(
         onDismissRequest = onResume,
-        title = { Text(entry.title) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(entry.title)
+                Spacer(Modifier.width(8.dp))
+                // The power light: the only green in the app.
+                PowerLight()
+            }
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onResume, modifier = Modifier.fillMaxWidth()) {
