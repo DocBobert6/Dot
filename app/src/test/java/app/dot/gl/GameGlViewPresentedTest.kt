@@ -10,6 +10,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The presented-frame wiring (Phase 1.3): before this fix nothing
@@ -20,6 +21,7 @@ import org.robolectric.RobolectricTestRunner
  * view's onFramePresented must tick it.
  */
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35]) // Project standard: every Robolectric test pins 35 (36 has no android-all jar).
 class GameGlViewPresentedTest {
 
     @Before

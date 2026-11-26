@@ -12,6 +12,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The Start/Select pills (Phase 1.2, device): the old fixed 64 dp
@@ -20,6 +21,7 @@ import org.robolectric.RobolectricTestRunner
  * fragments ("CT" / "CEI"). The pill must grow to fit the label.
  */
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35]) // Project standard: every Robolectric test pins 35 (36 has no android-all jar).
 class OverlayControlsTest {
 
     @get:Rule
