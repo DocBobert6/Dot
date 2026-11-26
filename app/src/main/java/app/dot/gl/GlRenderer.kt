@@ -185,12 +185,7 @@ class GlRenderer(
         val inversionOn = true // Locked ON in Phase 1.
 
         // The chain label names what actually drew (§1.1).
-        val label = buildString {
-            append("gl:deband>dither-invert>deflicker>scalefx3x+raa>sharp-bilinear")
-            if (useMitchell) append(">mitchell")
-            append(">rcas")
-        }
-        host.onChainLabel(label)
+        host.onChainLabel(ChainParity.chainLabel(useMitchell))
 
         pool.beginFrame()
         val exclude = if (historyTargetId >= 0) setOf(historyTargetId) else emptySet()
@@ -201,7 +196,8 @@ class GlRenderer(
         uploadMask(frame.deflickerMask)
 
         // FBO pass count (for the flip parity, §1.3). Counted from
-        // the passes actually run this frame, not a constant.
+        // the passes actually run this frame, not a constant — the
+        // counter below must stay in step with ChainParity.
         var fboPasses = 0
 
         // 2. Dither-invert the debanded plane.
@@ -341,12 +337,12 @@ class GlRenderer(
         }
 
         // 8. RCAS to the screen. The final flip is the parity of the
-        // FBO passes actually run (§1.3).
+        // FBO passes actually run (§1.3) — and it must agree with
+        // the pure table (ChainParity), which the tests pin.
         val flip = fboPasses % 2 == 1
-        if (!inversionOn) {
-            // Inversion is locked on; this branch documents the
-            // parity table (9 passes without inversion = flip).
-            Log.w(TAG, "inversion off (unexpected in Phase 1)")
+        check(flip == ChainParity.needsFinalFlip(inversionOn, useMitchell)) {
+            "FBO pass count $fboPasses disagrees with ChainParity " +
+                "(expected ${ChainParity.fboPassCount(inversionOn, useMitchell)})"
         }
         clearCharcoalFull()
         val offsetX = (surfaceWidth - onScreen.first) / 2
