@@ -7,6 +7,12 @@ package app.dot.gl
 // rendering (beginRender). Each method returns true iff this call
 // caused a render request. All methods are synchronised; the three
 // booleans are the whole state.
+//
+// CALLERS MUST ACT ON THE RETURN VALUE. Both sides request the
+// render when they complete a pair. Discarding the value on
+// either side wedges the gate permanently: the pair completes
+// with no render requested, so no draw ever re-arms it (the
+// Phase 1 black screen on device, v0.1.0-phase1.1).
 // Copyright (c) 2026 Dot contributors. All rights reserved.
 
 class FrameRenderGate {

@@ -2,6 +2,8 @@ package app.dot
 
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.os.Vibrator
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -96,7 +98,15 @@ fun GameScreen(
             gameTitle = entry.title,
             appVersion = appVersionString(context),
             onGlFailed = { _, _, _ ->
-                glError = "The graphics chain failed. See Settings for the failure report."
+                // The failure arrives on the GL thread; the error
+                // state is a Compose state, so the write is posted
+                // to the main thread, where recomposition is
+                // guaranteed. A late failure (after composition)
+                // must surface the error screen, not sit in a
+                // @Volatile var the UI never re-reads.
+                Handler(Looper.getMainLooper()).post {
+                    glError = "The graphics chain failed. See Settings for the failure report."
+                }
                 Thread({ session.stop() }, "dot-gl-fail-stop").start()
             },
         )

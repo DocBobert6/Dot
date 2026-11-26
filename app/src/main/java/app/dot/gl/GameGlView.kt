@@ -94,15 +94,39 @@ class GameGlView @JvmOverloads constructor(
         })
     }
 
-    /** Posts a frame (emu thread). The gate's frameComplete side. */
+    /**
+     * Posts a frame (emu thread). The gate's frameComplete side.
+     *
+     * The gate's return value is load-bearing: whichever side
+     * completes a frame's pair requests the render. A previous
+     * version discarded this value here, and a one-frame slip
+     * between the emu, main, and GL threads wedged the gate
+     * permanently — the pair completed on this side with no
+     * render requested, so no draw ever re-armed it (the Phase 1
+     * black screen on device, v0.1.0-phase1.1). Never discard it.
+     */
     fun postFrame(frame: GlFrame) {
         pendingFrame.set(frame)
-        gate.onFrameComplete()
+        if (gate.onFrameComplete()) {
+            requestRenderIfReady()
+        }
     }
 
     /** Reports that the posted frame has landed (main thread). Requests a render iff this completes the frame. */
     fun onFrameLanded() {
         if (gate.onFrameLanded()) {
+            requestRenderIfReady()
+        }
+    }
+
+    /**
+     * Requests a render only when the GL thread exists. If view
+     * creation failed (no GLES 3.0), setRenderer never ran, so
+     * requestRender would crash — and the error screen owns that
+     * case, not the frame path.
+     */
+    private fun requestRenderIfReady() {
+        if (renderer != null) {
             requestRender()
         }
     }
