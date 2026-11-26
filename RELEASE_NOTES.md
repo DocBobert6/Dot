@@ -1,37 +1,57 @@
-# Dot 0.1.0-phase0.1 — Phase 0 scaffold
+# Dot 0.1.0-phase1.1 — Phase 1: the player
 
-First build. Scaffolding, foundations, measurement — no game
-playback yet.
+The first build that plays games. The full picture chain from the
+plan (sharp-bilinear upscaling, dither inversion, the Micro-hybrid
+grayscale palette), the player with haptics, the layout editor, the
+gamepad, the benchmark harness, and cover art.
 
 ## New features
 
-- New public repo (DocBobert6/Dot, package app.dot) with CI that
-  builds a debug APK on every push and a signed release APK on
-  every tag, attached to the GitHub release by the workflow.
-- mGBA core integration: the libretro/mgba fork, branch
-  dmg/phase-0, pinned commit f705b5d69e88116326124ead0fa6bd2ecbd2aa41
-  (mGBA 0.11.0), built in CI with -DLIBMGBA_ONLY=ON
-  -DBUILD_LIBRETRO=ON, NDK 27.2.12479018, arm64-v8a, android-21.
-  Licence audit in CI on every build (MPL-2.0, no Exhibit B, the
-  four fork-only core options present).
-- Minimal JNI bridge (libdot-bridge.so) proving the core link:
-  one function, retro_api_version, symbol-verified in CI.
-- DMG header validation from the first build: Nintendo logo at
-  0x104-0x133, CGB flag at 0x143 (0x00 and 0x80 accepted, 0x80 in
-  DMG mode; 0xC0 refused plainly), header checksum at 0x14D, 8 MB
-  import cap — with the failing bytes named in the message.
-- Dex guard (no app method over 255 registers) and Robolectric
-  startup gate from the first build. Manifest permissions pinned
-  by test: VIBRATE, INTERNET, ACCESS_NETWORK_STATE.
+- Game playback: the mGBA core (libretro/mgba fork, pinned
+  f705b5d6, mGBA 0.11.0) behind the GL picture chain — sharp-bilinear
+  upscaling, dither inversion, Micro-hybrid C adjusted grayscale
+  (paper white #FFFFFF, mids 180 and 90, Vantablack #000000) — at
+  Auto / 1080p / 4K render resolution, portrait-first like the real
+  DMG.
+- Haptics with per-button character: full clicks on A/B, lighter
+  envelope clicks on Start/Select, direction ticks on the D-pad,
+  release ticks on lift-off, light clicks on FF/RW — On/Off plus a
+  strength slider, and a Test haptics probe in Settings that reports
+  Played / Rejected / Threw for each effect with the phone's facts.
+  Game rumble wins over UI clicks while a rumble-pak game rumbles.
+- Layout editor: drag any control to move it, snap to an 8 dp grid,
+  move the cluster together, resize in 4 dp steps, reset to factory
+  — and a default layout that applies to every game without its own.
+- D-pad as a single cross, with slide-off release and diagonal
+  handling. Fast-forward (2x/3x/4x), half-speed, and rewind with a
+  30-second ring — all hidden by default, each with its own switch.
+- Gamepad support (DMG mapping; L/R have no DMG function).
+- Cover art: boxarts from the libretro-thumbnails Game Boy set,
+  matched stem-first against the filename and header title, fetched
+  over Wi-Fi (mobile data only if you opt in), with custom covers
+  from the photo picker, a 50 MB cap, and a status line that names
+  what's still missing.
+- Settings rebuilt: Display, Audio, Controls, Cover art, Default
+  layout, Storage, Crash report, Graphics failure report, Developer,
+  About. The Developer screen arms and reads the 600-frame benchmark
+  (avg fps, 1% low, p95, p99, worst, drops) with the Phase 1 gate.
+- Explicit back stack with double-back-to-exit on the Library,
+  long-press Rename / Move controls / Remove on library games, and
+  a crash report and import trace in Settings.
 
 ## Improvements
 
-- Portrait-first library, silver and black, dot-matrix dot icon.
+- The player session was reworked: the emulator loop is the single
+  input pusher, saves and states are written asynchronously, and
+  stopping always joins the emulator thread, then the audio thread,
+  then writes, then unloads — in that order.
+- The FPS counter (off by default) now re-reads its switch live and
+  hides while a benchmark capture runs.
 
 ## Bug fixes
 
-- Various bug fixes and stability improvements.
+- Various bug fixes and stability improvements
 
 ## Maintenance
 
-- General maintenance.
+- Various bug fixes and stability improvements
