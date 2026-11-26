@@ -68,7 +68,14 @@ import kotlinx.coroutines.delay
 // Copyright (c) 2026 Dot contributors. All rights reserved.
 
 @Composable
-fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
+fun GameScreen(
+    entry: LibraryEntry,
+    onExit: () -> Unit,
+    /** The library's "Move controls" opens the player with the
+     *  layout editor open. Transient UI state: it is not part of
+     *  the nav-stack key and does not survive recreation. */
+    startWithEditorOpen: Boolean = false,
+) {
     val context = LocalContext.current
     val activity = context as Activity
     val session = remember(entry.sha256) {
@@ -100,8 +107,22 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     }
     var pickerMode by remember { mutableStateOf<PickerMode?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
-    var editorOpen by remember { mutableStateOf(false) }
+    var editorOpen by remember(entry.sha256) {
+        mutableStateOf(startWithEditorOpen)
+    }
+    // "Move controls" pauses once the session reaches Running, so
+    // the editor opens over the paused game. Exactly once per game
+    // entry — a manual resume after that is the user's own.
+    var editorAutoPaused by remember(entry.sha256) { mutableStateOf(false) }
     val state by session.state.collectAsState()
+    LaunchedEffect(state) {
+        if (startWithEditorOpen && !editorAutoPaused &&
+            state == PlayerSession.State.Running
+        ) {
+            editorAutoPaused = true
+            session.pause()
+        }
+    }
     // The resolved control layout (per-game, else the customised
     // default, else the factory). The layout editor refreshes it.
     var layout by remember(entry.sha256) {

@@ -41,7 +41,27 @@ object Benchmark {
         val startedMs: Long,
         val gameSha: String,
         val chainLabel: String,
-    )
+        /** False when the capture was stopped early (a partial). */
+        val completed: Boolean = true,
+    ) {
+        /** Capture duration in ms, from the delivered intervals. */
+        val durationMs: Double
+            get() = if (delivered.avgFps > 0) {
+                delivered.frames * 1000.0 / delivered.avgFps
+            } else {
+                0.0
+            }
+    }
+
+    /** A manual stop's outcome (§7.2). */
+    sealed interface StopOutcome {
+        data class Kept(val capture: Capture) : StopOutcome
+        data object Discarded : StopOutcome
+        data object NotRunning : StopOutcome
+    }
+
+    /** A partial capture is kept only with at least this many frames. */
+    const val MIN_PARTIAL_FRAMES = 60
 
     private class Clock {
         val times = ArrayList<Long>(CAPTURE_FRAMES + 1)
@@ -61,37 +81,46 @@ object Benchmark {
 
         fun isDone(): Boolean = times.size >= CAPTURE_FRAMES + 1
 
+        /** Timestamps recorded (first is the priming timestamp). */
+        fun progress(): Int = times.size
+
         fun stats(): Stats? {
             if (times.size < 2) return null
             val intervals = ArrayList<Long>(times.size - 1)
             for (i in 1 until times.size) {
                 intervals.add(times[i] - times[i - 1])
             }
-            intervals.sort()
-            val n = intervals.size
-            val totalNanos = intervals.sum()
-            val avgMs = totalNanos.toDouble() / n / 1_000_000.0
-            val avgFps = 1_000_000_000.0 / (totalNanos.toDouble() / n)
-            val p95 = intervals[(n * 0.95).toInt().coerceAtMost(n - 1)] / 1_000_000.0
-            val p99 = intervals[(n * 0.99).toInt().coerceAtMost(n - 1)] / 1_000_000.0
-            val worst = intervals[n - 1] / 1_000_000.0
-            // 1% low: the average fps of the slowest 1% of intervals.
-            val slowestCount = (n * 0.01).toInt().coerceAtLeast(1)
-            val slowest = intervals.takeLast(slowestCount)
-            val low1PctFps =
-                1_000_000_000.0 / (slowest.sum().toDouble() / slowest.size)
-            val drops = intervals.count { it > NOMINAL_FRAME_NANOS * 3 / 2 }
-            return Stats(
-                frames = n,
-                avgFps = avgFps,
-                p95Ms = p95,
-                p99Ms = p99,
-                worstMs = worst,
-                low1PctFps = low1PctFps,
-                drops = drops,
-                dropPct = drops * 100.0 / n,
-            )
+            return statsFromIntervals(intervals)
         }
+    }
+
+    /** Stats from raw frame intervals (sorted here; the snapshot
+     *  is the only place sorting happens, never per frame). */
+    private fun statsFromIntervals(intervals: List<Long>): Stats? {
+        if (intervals.isEmpty()) return null
+        val sorted = intervals.sorted()
+        val n = sorted.size
+        val totalNanos = sorted.sum()
+        val avgFps = 1_000_000_000.0 / (totalNanos.toDouble() / n)
+        val p95 = sorted[(n * 0.95).toInt().coerceAtMost(n - 1)] / 1_000_000.0
+        val p99 = sorted[(n * 0.99).toInt().coerceAtMost(n - 1)] / 1_000_000.0
+        val worst = sorted[n - 1] / 1_000_000.0
+        // 1% low: the average fps of the slowest 1% of intervals.
+        val slowestCount = (n * 0.01).toInt().coerceAtLeast(1)
+        val slowest = sorted.takeLast(slowestCount)
+        val low1PctFps =
+            1_000_000_000.0 / (slowest.sum().toDouble() / slowest.size)
+        val drops = sorted.count { it > NOMINAL_FRAME_NANOS * 3 / 2 }
+        return Stats(
+            frames = n,
+            avgFps = avgFps,
+            p95Ms = p95,
+            p99Ms = p99,
+            worstMs = worst,
+            low1PctFps = low1PctFps,
+            drops = drops,
+            dropPct = drops * 100.0 / n,
+        )
     }
 
     private val deliveredClock = Clock()
@@ -102,24 +131,114 @@ object Benchmark {
     @Volatile var liveFps: Double = 0.0
         private set
 
+    /**
+     * The last finished capture, for the Developer screen. Cleared
+     * when a game stops (§7.2: a stale partial capture and stale
+     * game title must not survive into the next launch) and when a
+     * manual stop discards a too-short capture.
+     */
+    @Volatile
+    var lastCapture: Capture? = null
+        private set
+
     private val recentPresented = ArrayDeque<Long>(128)
     private var lastLiveUpdateMs = 0L
 
-    /** Starts a capture. Safe to call when one is already running.
-     *  [startNanos] is exposed only so tests can drive the clocks
-     *  with exact timestamps; production callers omit it. */
+    /**
+     * Starts a capture. Returns false when one is already running
+     * (§7.2: starting while running returns false — it never
+     * restarts a capture in flight). [startNanos] is exposed only
+     * so tests can drive the clocks with exact timestamps;
+     * production callers omit it.
+     */
     @Synchronized
     fun startCapture(
         gameSha: String,
         chainLabel: String,
         startNanos: Long = System.nanoTime(),
-    ) {
+    ): Boolean {
+        if (isCapturing()) return false
         val now = startNanos
         deliveredClock.start(now)
         presentedClock.start(now)
         captureGameSha = gameSha
         captureChainLabel = chainLabel
         captureStartedMs = System.currentTimeMillis()
+        return true
+    }
+
+    /** Delivered frames recorded so far in the running capture. */
+    @Synchronized
+    fun captureProgress(): Int {
+        if (!isCapturing()) return 0
+        return (deliveredClock.progress() - 1).coerceIn(0, CAPTURE_FRAMES)
+    }
+
+    /**
+     * Stops the running capture by hand. A partial is kept only
+     * with at least 60 frames (marked incomplete); anything shorter
+     * is discarded as noise — and the previously displayed result
+     * is cleared with it, so the Developer screen does not keep
+     * showing an older capture as if this stop had produced it.
+     */
+    @Synchronized
+    fun stopCapture(): StopOutcome {
+        if (!isCapturing()) return StopOutcome.NotRunning
+        val delivered = deliveredClock.stats()
+        val presented = presentedClock.stats()
+        deliveredClock.capturing = false
+        presentedClock.capturing = false
+        val frames = delivered?.frames ?: 0
+        if (frames < MIN_PARTIAL_FRAMES || delivered == null || presented == null) {
+            lastCapture = null
+            return StopOutcome.Discarded
+        }
+        val capture = Capture(
+            delivered = delivered,
+            presented = presented,
+            startedMs = captureStartedMs,
+            gameSha = captureGameSha,
+            chainLabel = captureChainLabel,
+            completed = false,
+        )
+        lastCapture = capture
+        return StopOutcome.Kept(capture)
+    }
+
+    /**
+     * Cancels a running capture without keeping a result. Used
+     * when the game stops (§7.2).
+     */
+    @Synchronized
+    fun cancelCapture() {
+        deliveredClock.capturing = false
+        presentedClock.capturing = false
+    }
+
+    /** Clears the last capture (a game stop must not leave a stale
+     *  result for the next launch). */
+    fun clearLastCapture() {
+        lastCapture = null
+    }
+
+    /**
+     * The live rolling stats from the presented 120-frame window
+     * (the same window liveFps comes from), or null when fewer
+     * than two frames have landed. The Developer screen polls this
+     * twice a second.
+     */
+    @Synchronized
+    fun liveStats(): Stats? {
+        if (recentPresented.size < 2) return null
+        val intervals = ArrayList<Long>(recentPresented.size - 1)
+        val iterator = recentPresented.iterator()
+        var prev = iterator.next()
+        while (iterator.hasNext()) {
+            val now = iterator.next()
+            intervals.add(now - prev)
+            prev = now
+        }
+        return statsFromIntervals(intervals)
     }
 
     @Synchronized
@@ -154,13 +273,16 @@ object Benchmark {
         val presented = presentedClock.stats() ?: return null
         deliveredClock.capturing = false
         presentedClock.capturing = false
-        return Capture(
+        val capture = Capture(
             delivered = delivered,
             presented = presented,
             startedMs = captureStartedMs,
             gameSha = captureGameSha,
             chainLabel = captureChainLabel,
+            completed = true,
         )
+        lastCapture = capture
+        return capture
     }
 
     /** The FPS gate verdict for a capture. Measurements only — the

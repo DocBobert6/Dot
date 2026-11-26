@@ -240,6 +240,10 @@ class PlayerSession(
      *  JOIN_EMU -> JOIN_AUDIO -> WRITE_SAVE -> WRITE_AUTO ->
      *  RELEASE_AUDIO -> UNLOAD_CORE. */
     fun stop() {
+        // Stopping the game cancels any running capture, and the
+        // last capture does not survive into the next launch (§7.2).
+        Benchmark.cancelCapture()
+        Benchmark.clearLastCapture()
         stopRequested = true
         val token = generation.get()
         val emu = emuThread
