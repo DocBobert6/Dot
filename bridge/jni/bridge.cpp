@@ -185,12 +185,36 @@ static size_t g_audioWrite = 0;
 static size_t g_audioCount = 0;  // frames currently in the ring
 static bool g_audioDiscard = false;
 
+// DC-blocking high-pass, one pole per channel (GL-CHAIN-SPEC §1D).
+// The core already DC-blocks GB audio with its own capacitor model
+// (gb/audio.c: FILTER = 65368, cutoff ~53 Hz at 131072 Hz), so this
+// is a SECOND guard, not the primary blocker: its cutoff is ~10 Hz
+// (R = exp(-2*pi*10/131072) = 0.9995207), well below the core's, so
+// it removes only residual offset and does not thin bass twice over
+// (a 53 Hz tone passes at 98%). The fork audit (2026-11-26) also
+// confirmed the GB path does no resampling (raw 131072 Hz, no
+// windowed-sinc/polyphase FIR anywhere in the libretro path) and
+// blip_buf is absent from this fork copy — so there is no fork
+// resampler to replace and nothing to ship. The stream arrives as
+// int16 stereo, L,R interleaved, in irregular bursts (up to 512
+// frames); this state is kept across batch boundaries and reset
+// only when the ring is (re)initialised.
+static constexpr float kDcBlockR = 0.9995207f;
+static float g_dcPrevInL = 0.0f;
+static float g_dcPrevInR = 0.0f;
+static float g_dcPrevOutL = 0.0f;
+static float g_dcPrevOutR = 0.0f;
+
 static void audioRingInit(int sampleRate) {
     size_t frames = sampleRate > 0 ? (size_t)sampleRate : kAudioRingFrames;
     g_audioRing.assign(frames * 2, 0);
     g_audioRead = 0;
     g_audioWrite = 0;
     g_audioCount = 0;
+    g_dcPrevInL = 0.0f;
+    g_dcPrevInR = 0.0f;
+    g_dcPrevOutL = 0.0f;
+    g_dcPrevOutR = 0.0f;
 }
 
 static size_t audioBatchCallback(const int16_t* data, size_t frames) {
@@ -488,6 +512,27 @@ Java_app_dot_Bridge_nativeReadAudio(JNIEnv* env, jclass /* clazz */,
     if (first < (size_t)frames) {
         std::memcpy(tmp.data() + first * 2, g_audioRing.data(),
                     ((size_t)frames - first) * 2 * sizeof(int16_t));
+    }
+    // DC-blocking high-pass, one pole per channel (see the note at
+    // the state above). y[n] = x[n] - x[n-1] + R*y[n-1], applied to
+    // the drained batch; the state persists across batches.
+    for (int i = 0; i < frames; ++i) {
+        const float inL = (float)tmp[(size_t)i * 2];
+        const float inR = (float)tmp[(size_t)i * 2 + 1];
+        float outL = (inL - g_dcPrevInL) + kDcBlockR * g_dcPrevOutL;
+        float outR = (inR - g_dcPrevInR) + kDcBlockR * g_dcPrevOutR;
+        g_dcPrevInL = inL;
+        g_dcPrevInR = inR;
+        g_dcPrevOutL = outL;
+        g_dcPrevOutR = outR;
+        // Clamp to int16 (the filter cannot exceed the input range
+        // by more than the DC it removes, but clamp anyway).
+        if (outL > 32767.0f) outL = 32767.0f;
+        if (outL < -32768.0f) outL = -32768.0f;
+        if (outR > 32767.0f) outR = 32767.0f;
+        if (outR < -32768.0f) outR = -32768.0f;
+        tmp[(size_t)i * 2] = (int16_t)outL;
+        tmp[(size_t)i * 2 + 1] = (int16_t)outR;
     }
     env->SetShortArrayRegion(samples, 0, frames * 2,
                             reinterpret_cast<const jshort*>(tmp.data()));
