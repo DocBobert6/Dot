@@ -2,12 +2,16 @@ package app.dot
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitPointerEvent
+// NOTE: awaitPointerEvent() is a member of the AwaitPointerEventScope
+// receiver inside awaitEachGesture — it takes no import. Importing it
+// from either gestures or ui.input.pointer fails the build.
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,15 +80,20 @@ fun OverlayControls(
     rewindHolding: Boolean,
     onRewindHolding: (Boolean) -> Unit,
     isForeground: Boolean,
+    isPaused: Boolean,
     modifier: Modifier = Modifier,
 ) {
     // One shared input mask: each control owns its bits, the overlay
     // merges them and pushes the result (store-only — the session's
-    // emu loop is the single pusher to the core).
+    // emu loop is the single pusher to the core). The push fires
+    // only when the mask actually changes (C10 #5).
     var mask by remember { mutableIntStateOf(0) }
     fun updateBits(bits: Int, value: Int) {
-        mask = (mask and bits.inv()) or (value and bits)
-        session.setInput(mask)
+        val next = (mask and bits.inv()) or (value and bits)
+        if (next != mask) {
+            mask = next
+            session.setInput(mask)
+        }
     }
 
     val inputEnabled = layout.opacity > 0
@@ -125,6 +134,11 @@ fun OverlayControls(
                 onDirections = { dirs -> updateBits(DIRS_MASK, dirs) },
                 enabled = inputEnabled,
                 alpha = alpha,
+                // While paused the highlight is forced to 0 in
+                // composition, so it clears the moment the pause
+                // overlay appears instead of waiting on the
+                // pointer-input restart (§4.1).
+                highlightDirs = if (isPaused) 0 else null,
             )
         }
 
@@ -199,6 +213,7 @@ fun OverlayControls(
                     alpha = alpha,
                     enabled = inputEnabled,
                     labelSize = 14.sp,
+                    utility = true,
                     onHold = { down ->
                         if (down) haptics.utilityClick()
                         else haptics.utilityReleaseTick()
@@ -218,6 +233,7 @@ fun OverlayControls(
                     alpha = alpha,
                     enabled = inputEnabled,
                     labelSize = 14.sp,
+                    utility = true,
                     active = slowOn,
                     onHold = { down ->
                         // A toggle, not a hold: the press flips it.
@@ -240,6 +256,7 @@ fun OverlayControls(
                     alpha = alpha,
                     enabled = inputEnabled,
                     labelSize = 14.sp,
+                    utility = true,
                     active = rewindHolding,
                     onHold = { down ->
                         if (down) {
@@ -266,12 +283,15 @@ fun OverlayControls(
 // -- the single-cross D-pad ------------------------------------------
 
 @Composable
-private fun DPadCross(
+internal fun DPadCross(
     spec: ControlSpec,
     haptics: HapticsEngine,
     onDirections: (Int) -> Unit,
     enabled: Boolean,
     alpha: Float,
+    /** When non-null, the highlight is forced to this mask instead
+     *  of the live gesture state (the pause overlay forces 0). */
+    highlightDirs: Int? = null,
 ) {
     var activeDirs by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
@@ -324,7 +344,12 @@ private fun DPadCross(
                                 }
                                 lastDirs = dirs
                             }
-                            if (event.changes.none { it.pressed }) break
+                            // The gesture ends when no pointer is
+                            // left on the cross — not when one event
+                            // happens to list no pressed change (a
+                            // move event may only carry the other
+                            // finger while this one still holds).
+                            if (pointers.isEmpty()) break
                         }
                     } finally {
                         // Lift-off: the mask clears here, and the
@@ -338,7 +363,10 @@ private fun DPadCross(
                 }
             },
     ) {
-        CrossCanvas(activeDirs = activeDirs, modifier = Modifier.fillMaxSize())
+        CrossCanvas(
+            activeDirs = highlightDirs ?: activeDirs,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -350,19 +378,28 @@ private fun mergedDirs(pointers: Map<PointerId, Offset>, half: Float): Int {
     return mask
 }
 
-/** The cross itself: two bars, with the held arms highlighted. */
+/** The cross itself (§4.1): a flat charcoal well with indigo arms;
+ *  a held arm brightens to full indigo. */
 @Composable
 private fun CrossCanvas(activeDirs: Int, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val s = size.minDimension
         val arm = s * 0.36f
         val r = s * 0.10f
-        val base = Color(0xFF2A2A2A)
-        val lit = Color(0xFF888888)
-        fun armColor(bit: Int) = if (activeDirs and bit != 0) lit else base
+        val well = Color(0xFF1E1E1E)
+        val armRest = Color(0xFF44448A)
+        val armLit = Color(0xFF5B5BD6)
+        fun armColor(bit: Int) = if (activeDirs and bit != 0) armLit else armRest
+        // The well behind the cross.
+        drawRoundRect(
+            color = well,
+            topLeft = Offset.Zero,
+            size = Size(s, s),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(r * 2f, r * 2f),
+        )
         // Centre square.
         drawRoundRect(
-            color = base,
+            color = armRest,
             topLeft = Offset((s - arm) / 2f, (s - arm) / 2f),
             size = Size(arm, arm),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
@@ -437,23 +474,41 @@ private fun CrossCanvas(activeDirs: Int, modifier: Modifier = Modifier) {
 // -- round / pill control buttons ------------------------------------
 
 @Composable
-private fun RoundControlButton(
+internal fun RoundControlButton(
     label: String,
     spec: ControlSpec,
     alpha: Float,
     enabled: Boolean,
     labelSize: TextUnit = 22.sp,
     active: Boolean = false,
+    /** FF / 0.5x / RW render as muted indigo-grey circles (§4.1). */
+    utility: Boolean = false,
     onHold: (Boolean) -> Unit,
 ) {
     var pressed by remember { mutableStateOf(false) }
+    val indigo = Color(0xFF5B5BD6)
+    val fill = when {
+        pressed || active -> indigo
+        utility -> Color(0xFF3A3A55)
+        else -> Color(0xFF2A2A2A)
+    }
     Box(
         modifier = Modifier
             .size(spec.sizeDp.dp)
             .alpha(alpha)
             .clip(CircleShape)
-            .background(
-                if (pressed || active) Color(0xFF888888) else Color(0xFF3A3A3A),
+            .background(fill)
+            // A/B carry a thin indigo ring; pressed is solid indigo.
+            .then(
+                if (!utility && !pressed && !active) {
+                    Modifier.border(
+                        width = 1.5.dp,
+                        color = indigo.copy(alpha = 0.7f),
+                        shape = CircleShape,
+                    )
+                } else {
+                    Modifier
+                },
             )
             .holdButton(
                 enabled = enabled,
@@ -472,7 +527,7 @@ private fun RoundControlButton(
 }
 
 @Composable
-private fun PillControlButton(
+internal fun PillControlButton(
     label: String,
     spec: ControlSpec,
     alpha: Float,
@@ -492,7 +547,9 @@ private fun PillControlButton(
                 .size(spec.sizeDp.dp, (spec.sizeDp / 2).dp)
                 .alpha(alpha)
                 .clip(RoundedCornerShape(12.dp))
-                .background(if (pressed) Color(0xFF555555) else Color(0xFF2A2A2A))
+                .background(
+                    if (pressed) Color(0xFF5B5BD6) else Color(0xFF2A2A2A),
+                )
                 .holdButton(
                     enabled = enabled,
                     onDown = { pressed = true; onHold(true) },
@@ -501,15 +558,26 @@ private fun PillControlButton(
                 .padding(horizontal = 20.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(label, color = Color.White, fontSize = 13.sp)
+            // Label in muted indigo-grey; pressed is indigo with a
+            // white label (§4.1).
+            Text(
+                label,
+                color = if (pressed) Color.White else Color(0xFF9A9AC2),
+                fontSize = 13.sp,
+            )
         }
     }
 }
 
 /**
- * Press-and-hold input. The `finally` is load-bearing: without it a
- * gesture cancelled mid-press leaves the button stuck down (an
- * overlay-audit finding in Atomic/Poing).
+ * Press-and-hold input (C10 #2, #3). Each button tracks its own
+ * down pointer's id and releases when it lifts OR its position
+ * exits the button bounds, past 8 dp of hysteresis — a finger
+ * sliding off no longer stays held forever. The `finally` is
+ * load-bearing: without it a gesture cancelled mid-press (e.g. a
+ * pointer-input restart on pause) leaves the button stuck down.
+ * The down itself is inside the try, so a restart with no finger
+ * down fires nothing.
  */
 fun Modifier.holdButton(
     enabled: Boolean = true,
@@ -519,12 +587,27 @@ fun Modifier.holdButton(
     pointerInput(enabled) {
         if (!enabled) return@pointerInput
         awaitEachGesture {
-            awaitFirstDown()
-            onDown()
+            val down = awaitFirstDown()
+            val id = down.id
             try {
-                do {
+                onDown()
+                while (true) {
                     val event = awaitPointerEvent()
-                } while (event.changes.any { it.pressed })
+                    // Only the tracked pointer decides: an event
+                    // carrying only the other finger must not end
+                    // this hold.
+                    val change = event.changes.firstOrNull { it.id == id }
+                    if (change != null) {
+                        if (!change.pressed) break
+                        val hyst = 8.dp.toPx()
+                        val pos = change.position
+                        if (pos.x < -hyst || pos.x > size.width + hyst ||
+                            pos.y < -hyst || pos.y > size.height + hyst
+                        ) {
+                            break
+                        }
+                    }
+                }
             } finally {
                 onUp()
             }

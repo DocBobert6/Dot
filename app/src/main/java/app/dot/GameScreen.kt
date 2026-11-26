@@ -100,6 +100,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
     }
     var pickerMode by remember { mutableStateOf<PickerMode?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    var editorOpen by remember { mutableStateOf(false) }
     val state by session.state.collectAsState()
     // The resolved control layout (per-game, else the customised
     // default, else the factory). The layout editor refreshes it.
@@ -345,6 +346,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
             rewindHolding = rewindHolding,
             onRewindHolding = { rewindHolding = it },
             isForeground = isForeground,
+            isPaused = state == PlayerSession.State.Paused,
         )
         if (fpsOn && state == PlayerSession.State.Running) {
             Text(
@@ -383,6 +385,7 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
             onResume = { session.resume() },
             onSave = { pickerMode = PickerMode.Save },
             onLoad = { pickerMode = PickerMode.Load },
+            onMoveControls = { editorOpen = true },
             onBenchmark = {
                 session.startBenchmark(glView.chainLabel)
                 session.resume()
@@ -399,6 +402,40 @@ fun GameScreen(entry: LibraryEntry, onExit: () -> Unit) {
                 }
             },
             onExit = onExit,
+        )
+    }
+
+    // The layout editor overlays the paused game. Done commits the
+    // draft (the commit rule clears the per-game override when the
+    // draft lands on the effective default); Back discards it. The
+    // pause menu is still showing underneath when it closes.
+    if (editorOpen) {
+        LayoutEditor(
+            baseLayout = layout,
+            resetTarget = LayoutStore.effectiveDefault(
+                context.filesDir, entry.sha256,
+            ),
+            haptics = haptics,
+            ffVisible = ffVisible,
+            slowVisible = slowVisible,
+            rewindVisible = rewindVisible,
+            prefs = prefs,
+            onDone = { committed ->
+                if (committed != null) {
+                    val ok = LayoutStore.save(
+                        context.filesDir, entry.sha256, committed,
+                    )
+                    if (ok) {
+                        layout = LayoutStore.load(
+                            context.filesDir, entry.sha256,
+                        )
+                        message = "Layout saved."
+                    } else {
+                        message = "Layout save failed."
+                    }
+                }
+                editorOpen = false
+            },
         )
     }
 
@@ -477,6 +514,7 @@ private fun PauseMenu(
     onResume: () -> Unit,
     onSave: () -> Unit,
     onLoad: () -> Unit,
+    onMoveControls: () -> Unit,
     onBenchmark: () -> Unit,
     onReport: () -> Unit,
     onExit: () -> Unit,
@@ -494,6 +532,9 @@ private fun PauseMenu(
                 }
                 TextButton(onClick = onLoad, modifier = Modifier.fillMaxWidth()) {
                     Text("Load from slot")
+                }
+                TextButton(onClick = onMoveControls, modifier = Modifier.fillMaxWidth()) {
+                    Text("Move controls")
                 }
                 TextButton(onClick = onBenchmark, modifier = Modifier.fillMaxWidth()) {
                     Text("Start benchmark (600 frames)")
