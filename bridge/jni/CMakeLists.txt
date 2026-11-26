@@ -1,20 +1,20 @@
-// Dot — bridge CMake (Phase 0 scaffolding).
-//
-// Builds libdot-bridge.so from bridge.cpp only, linking the
-// prebuilt mGBA libretro core .so as an IMPORTED library — the same
-// link the real bridge will keep.
-//
-// CI invocation (from the repository root):
-//   cmake -S bridge/jni -B build-bridge \
-//     -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
-//     -DANDROID_ABI=arm64-v8a \
-//     -DANDROID_PLATFORM=android-21 \
-//     -DMGBA_ROOT=$GITHUB_WORKSPACE/core/mgba \
-//     -DMGBA_SO=$GITHUB_WORKSPACE/build-core/mgba_libretro.so \
-//     -DCMAKE_BUILD_TYPE=Release
-//   cmake --build build-bridge
-//
-// SPDX-License-Identifier: GPL-3.0-or-later
+# Dot — bridge CMake (Phase 0 scaffolding).
+#
+# Builds libdot-bridge.so from bridge.cpp only, linking the
+# prebuilt mGBA libretro core .so as an IMPORTED library — the same
+# link the real bridge will keep.
+#
+# CI invocation (from the repository root):
+#   cmake -S bridge/jni -B build-bridge \
+#     -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+#     -DANDROID_ABI=arm64-v8a \
+#     -DANDROID_PLATFORM=android-21 \
+#     -DMGBA_ROOT=$GITHUB_WORKSPACE/core/mgba \
+#     -DMGBA_SO=$GITHUB_WORKSPACE/build-core/mgba_libretro.so \
+#     -DCMAKE_BUILD_TYPE=Release
+#   cmake --build build-bridge
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 cmake_minimum_required(VERSION 3.10)
 project(dot-bridge)
