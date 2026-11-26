@@ -1,0 +1,342 @@
+# Dot — Android CI.
+#
+# Pipeline: licence/notice check -> core pin audit -> mGBA core
+# build -> bridge build -> symbol verification -> unit tests (with
+# the Robolectric startup gate) -> debug APK -> 255-register dex
+# guard -> tag-gated signed release APK -> GitHub release.
+#
+# Every shell step fails fast (set -euo pipefail). A red build stops
+# the line: fix it and verify green before pushing anything new.
+name: Dot Android CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CORE_PIN: f705b5d69e88116326124ead0fa6bd2ecbd2aa41
+  CORE_FORK: https://github.com/DocBobert6/mgba.git
+  CORE_BRANCH: dmg/phase-0
+  CORE_VERSION: 0.11.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify NOTICE matches the in-app copy
+        run: |
+          set -euo pipefail
+          diff NOTICE app/src/main/res/raw/notice.txt
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install NDK 27.2.12479018
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+          echo "NDK=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Clone the mGBA core fork at the pinned commit
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --branch "$CORE_BRANCH" "$CORE_FORK" core/mgba
+          git -C core/mgba checkout "$CORE_PIN"
+          git -C core/mgba rev-parse HEAD
+
+      - name: Audit core pins
+        run: |
+          set -euo pipefail
+          # The core licence must be MPL-2.0.
+          grep -q "Mozilla Public License Version 2.0" core/mgba/LICENSE
+          # No source file may carry an Exhibit B ("Incompatible With
+          # Secondary Licenses") notice.
+          if grep -r "Exhibit" core/mgba/src core/mgba/include; then
+            echo "ERROR: Exhibit notice found in the core sources" >&2
+            exit 1
+          fi
+          # No Android.mk outside the vendored deps directory.
+          if find core/mgba -name Android.mk -not -path "*/deps/*" | grep .; then
+            echo "ERROR: unexpected Android.mk in the core" >&2
+            exit 1
+          fi
+          # Exactly 17 mgba_* core options, including the four that
+          # exist only in the libretro fork (not upstream mgba-emu)
+          # and the two this app depends on by name.
+          OPTIONS_FILE=core/mgba/src/platform/libretro/libretro_core_options.h
+          COUNT=$(grep -o "mgba_[a-z0-9_]*" "$OPTIONS_FILE" | sort -u | wc -l)
+          test "$COUNT" -eq 17
+          for opt in mgba_gb_model mgba_sgb_borders mgba_gb_colors mgba_gb_colors_preset mgba_interframe_blending mgba_color_correction; do
+            grep -q "$opt" "$OPTIONS_FILE"
+          done
+
+      - name: Build the core
+        run: |
+          set -euo pipefail
+          cmake -S core/mgba -B build-core \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-21 \
+            -DLIBMGBA_ONLY=ON \
+            -DBUILD_LIBRETRO=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-core --parallel
+
+      - name: Verify the core library
+        run: |
+          set -euo pipefail
+          CORE_SO="$GITHUB_WORKSPACE/build-core/mgba_libretro.so"
+          file "$CORE_SO" | grep -q "ELF 64-bit LSB shared object, ARM aarch64"
+          test "$(stat -c%s "$CORE_SO")" -gt 102400
+          NM="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          # nm runs once into a file: piping nm into `grep -q` under
+          # pipefail is a false failure — grep exits on the first match,
+          # nm then dies on the closed pipe (exit 74) and pipefail fails
+          # the pipeline even though the symbol was found (2026-11-17).
+          "$NM" -D "$CORE_SO" > core-symbols.txt
+          for sym in retro_api_version retro_get_system_info retro_get_system_av_info \
+            retro_set_environment retro_set_video_refresh retro_set_audio_sample \
+            retro_set_audio_sample_batch retro_set_input_poll retro_set_input_state \
+            retro_init retro_deinit retro_load_game retro_unload_game retro_run \
+            retro_reset retro_serialize_size retro_serialize retro_unserialize \
+            retro_get_memory_data retro_get_memory_size retro_load_game_special \
+            retro_get_region retro_cheat_set retro_cheat_reset; do
+            grep -q " T $sym\$" core-symbols.txt || {
+              echo "ERROR: core is missing symbol $sym" >&2
+              exit 1
+            }
+          done
+
+      - name: Build the bridge
+        run: |
+          set -euo pipefail
+          cmake -S bridge/jni -B build-bridge \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-21 \
+            -DMGBA_ROOT="$GITHUB_WORKSPACE/core/mgba" \
+            -DMGBA_SO="$GITHUB_WORKSPACE/build-core/mgba_libretro.so" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-bridge --parallel
+
+      - name: Verify the bridge library
+        run: |
+          set -euo pipefail
+          BRIDGE_SO="$GITHUB_WORKSPACE/build-bridge/libdot-bridge.so"
+          file "$BRIDGE_SO" | grep -q "ELF 64-bit LSB shared object, ARM aarch64"
+          NM="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          "$NM" -D "$BRIDGE_SO" > bridge-symbols.txt
+          grep -q " T Java_app_dot_Bridge_nativeApiVersion\$" bridge-symbols.txt || {
+            echo "ERROR: bridge is missing Java_app_dot_Bridge_nativeApiVersion" >&2
+            exit 1
+          }
+
+      - name: Stage native libraries into the app
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp build-core/mgba_libretro.so app/src/main/jniLibs/arm64-v8a/libmgba_libretro.so
+          cp build-bridge/libdot-bridge.so app/src/main/jniLibs/arm64-v8a/libdot-bridge.so
+
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-test-reports
+          path: app/build/reports/tests/
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Dex guard — no app method over 255 registers
+        run: |
+          set -euo pipefail
+          DEXGUARD_TMP="$(mktemp -d)"
+          python3 - "$DEXGUARD_TMP" <<'PYEOF'
+          import glob
+          import os
+          import subprocess
+          import sys
+          # dexdump lives in the newest installed build-tools.
+          tools = sorted(glob.glob(os.path.join(os.environ["ANDROID_HOME"], "build-tools", "*", "dexdump")))
+          if not tools:
+              print("ERROR: dexdump not found", file=sys.stderr)
+              sys.exit(1)
+          dexdump = tools[-1]
+          dex_files = sorted(glob.glob(
+              "app/build/intermediates/dex/debug/**/*.dex", recursive=True))
+          if not dex_files:
+              # Diagnose instead of guessing: show what the dex
+              # intermediates actually contain, so the path can be
+              # fixed from evidence (the mergeDex layout moved
+              # between AGP versions).
+              print("ERROR: no dex files found under "
+                    "app/build/intermediates/dex/debug/", file=sys.stderr)
+              subprocess.run(
+                  ["find", "app/build/intermediates/dex", "-maxdepth", "4"],
+                  check=False)
+              sys.exit(1)
+          methods = []  # (registers, class, method)
+          current_class = ""
+          current_method = ""
+          for dex in dex_files:
+              # Binary mode + errors="replace": dexdump -d prints raw
+              # string-table bytes that are not valid UTF-8, and
+              # text=True dies on them with UnicodeDecodeError
+              # (seen 2026-11-16, ~19 MB into the dump).
+              raw = subprocess.run(
+                  [dexdump, "-d", dex], capture_output=True,
+                  check=True).stdout
+              out = raw.decode("utf-8", errors="replace")
+              for line in out.splitlines():
+                  stripped = line.strip()
+                  if stripped.startswith("#") and "(in L" in stripped:
+                      current_class = stripped.split("(in ", 1)[1].rstrip(";)")
+                      current_method = ""
+                  elif stripped.startswith("name") and ":" in stripped:
+                      current_method = stripped.split(":", 1)[1].strip().strip("'")
+                  elif stripped.startswith("registers") and ":" in stripped:
+                      try:
+                          regs = int(stripped.split(":", 1)[1].strip())
+                      except ValueError:
+                          continue
+                      if current_class.startswith("Lapp/dot/"):
+                          methods.append((regs, current_class, current_method))
+          methods.sort(reverse=True)
+          print("Largest app methods by register count:")
+          for regs, cls, name in methods[:8]:
+              print(f"  {regs:4d}  {cls}.{name}")
+          over = [m for m in methods if m[0] > 255]
+          if over:
+              print(f"ERROR: {len(over)} app method(s) exceed 255 registers", file=sys.stderr)
+              sys.exit(1)
+          print(f"Dex guard passed: {len(methods)} app methods checked, max {methods[0][0] if methods else 0} registers.")
+          PYEOF
+
+      - name: Restore release keystore
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/dot-release.keystore"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/dot-release.keystore" >> "$GITHUB_ENV"
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+      - name: Build signed release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: ./gradlew :app:assembleRelease --stacktrace
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Verify release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/release/app-release.apk)
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner"
+          AAPT2="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/aapt2"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          BADGING=$("$AAPT2" dump badging "$APK")
+          echo "$BADGING" | grep -q "package: name='app.dot'"
+          TAG="${GITHUB_REF#refs/tags/}"
+          EXPECTED_VERSION="${TAG#v}"
+          DECLARED_VERSION=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | cut -d'"' -f2)
+          DECLARED_CODE=$(grep -o 'versionCode = [0-9]*' app/build.gradle.kts | grep -o '[0-9]*')
+          test "$DECLARED_VERSION" = "$EXPECTED_VERSION"
+          echo "$BADGING" | grep -q "versionName='$EXPECTED_VERSION'"
+          echo "$BADGING" | grep -q "versionCode='$DECLARED_CODE'"
+          test "$DECLARED_CODE" -ge 1
+
+      - name: Upload core artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mgba-libretro-android
+          path: build-core/mgba_libretro.so
+
+      - name: Upload bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-bridge-android
+          path: build-bridge/libdot-bridge.so
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-apk-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-apk-release
+          path: app/build/outputs/apk/release/app-release.apk
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: dot-apk-release
+          path: release-apk
+
+      - name: Create GitHub release
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          APK="release-apk/app-release.apk"
+          mv "$APK" "dot-$TAG.apk"
+          BYTES=$(stat -c%s "dot-$TAG.apk")
+          SHA256=$(sha256sum "dot-$TAG.apk" | cut -d' ' -f1)
+          {
+            cat RELEASE_NOTES.md
+            echo ""
+            echo "## Build"
+            echo ""
+            echo "- Tag: $TAG"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Run: $GITHUB_RUN_ID"
+            echo "- APK: dot-$TAG.apk ($BYTES bytes)"
+            echo "- SHA-256: $SHA256"
+            echo "- Core pin: $CORE_PIN (mgba fork, dmg/phase-0)"
+            echo "- Signed with the Dot release key; signature and version verified by the build job (apksigner v2)."
+          } > release-notes.txt
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file release-notes.txt
+          else
+            gh release create "$TAG" --notes-file release-notes.txt --title "Dot $TAG"
+          fi
+          gh release upload "$TAG" "dot-$TAG.apk" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

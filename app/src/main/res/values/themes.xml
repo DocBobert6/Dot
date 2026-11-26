@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dot — theme. Silver and black, bright and sharp: silver faceplate
+  chrome, near-black charcoal base, white text.
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<resources>
+    <style name="Theme.Dot" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#1A1A1A</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#C0C0C0</item>
+        <item name="colorOnPrimaryContainer">#1A1A1A</item>
+        <item name="android:statusBarColor">#1A1A1A</item>
+    </style>
+</resources>

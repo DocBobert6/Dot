@@ -1,0 +1,17 @@
+# Android
+*.iml
+.gradle/
+local.properties
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.keystore
+*.jks
+# Signing credentials are never in the repo (CI restores the
+# keystore from secrets; the backup lives outside the repo).
+# macOS / editors
+.DS_Store
+.idea/
+*.swp

@@ -1,0 +1,30 @@
+Dot — Third-Party Notices
+============================
+
+Dot itself
+----------
+Dot is Copyright the Dot contributors.
+Licensed under the GNU General Public License, version 3 (GPL-3.0).
+See LICENSE in the repository root for the full text.
+
+mGBA core
+---------
+The Original Game Boy emulation core is mGBA, Copyright (c) 2013-2026
+Jeffrey Pfau and contributors, licensed under the
+Mozilla Public License, version 2.0 (MPL-2.0).
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+Source for the core, as used by Dot, is available at
+https://github.com/DocBobert6/mgba
+(branch dmg/phase-0, pinned commit
+f705b5d69e88116326124ead0fa6bd2ecbd2aa41, mGBA 0.11.0).
+The core is built from that fork. See CORE.md.
+
+Kotlin and AndroidX runtime
+----------------------------
+The Kotlin standard library and AndroidX libraries are licensed under
+the Apache License, version 2.0.
+https://www.apache.org/licenses/LICENSE-2.0
