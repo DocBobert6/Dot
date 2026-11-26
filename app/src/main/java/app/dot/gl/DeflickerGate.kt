@@ -62,7 +62,7 @@ class DeflickerGate {
                         blend[i] = (blend[i] - decayStep).coerceAtLeast(0f)
                     }
                 }
-                mask[i] = (blend[i] * 255f).toInt().coerceIn(0, 255).toByte()
+                mask[i] = Math.round(blend[i] * 255f).coerceIn(0, 255).toByte()
             }
         }
         prevPrev = p
