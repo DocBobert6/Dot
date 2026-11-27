@@ -19,6 +19,14 @@ import org.robolectric.annotation.Config
  * pill with 20 dp of horizontal padding left 24 dp for a 13 sp
  * label, so START / SELECT wrapped and clipped into unreadable
  * fragments ("CT" / "CEI"). The pill must grow to fit the label.
+ *
+ * Robolectric measures text at ~1 dp per character (START reads
+ * 5.0 dp, SELECT 6.0 dp here), so a real label's width cannot
+ * discriminate the old fixed pill from the new growing one — both
+ * fit inside 24 dp at that scale. The growth itself is proved with
+ * a 50-character probe label instead: the old pill stays 64 dp
+ * wide and the text wraps into 24 dp, while the new pill grows to
+ * 70 dp and the text stays one 50 dp line.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35]) // Project standard: every Robolectric test pins 35 (36 has no android-all jar).
@@ -27,12 +35,7 @@ class OverlayControlsTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    /**
-     * Renders one pill and asserts the whole label is visible: the
-     * text node's width must be at least the unclipped label width.
-     * The old layout measured ~24 dp here and fails.
-     */
-    private fun assertLabelUnclipped(label: String, minWidthDp: Float) {
+    private fun renderPill(label: String) {
         composeRule.setContent {
             Box(Modifier.size(400.dp)) {
                 PillControlButton(
@@ -44,23 +47,41 @@ class OverlayControlsTest {
                 )
             }
         }
-        val node = composeRule.onNodeWithText(label)
-        node.assertIsDisplayed()
-        val widthPx = node.fetchSemanticsNode().boundsInRoot.width
-        val widthDp = with(composeRule.density) { widthPx.toDp() }
-        assertTrue(
-            "label '$label' clipped to $widthDp (needs >= ${minWidthDp}dp)",
-            widthDp.value >= minWidthDp,
-        )
+    }
+
+    /** The label is present and rendered whole — never wrapped away. */
+    private fun assertLabelShown(label: String) {
+        renderPill(label)
+        composeRule.onNodeWithText(label).assertIsDisplayed()
     }
 
     @Test
     fun startLabelFitsWhole() {
-        assertLabelUnclipped("START", 30f)
+        assertLabelShown("START")
     }
 
     @Test
     fun selectLabelFitsWhole() {
-        assertLabelUnclipped("SELECT", 38f)
+        assertLabelShown("SELECT")
+    }
+
+    /**
+     * The pill grows to fit its label instead of wrapping it: a
+     * 50-character probe measures 50 dp wide as one line. The old
+     * fixed 64 dp pill wrapped it into 24 dp (and clipped it
+     * vertically) and fails this assertion.
+     */
+    @Test
+    fun pillGrowsForLongLabel() {
+        val probe = "X".repeat(50)
+        renderPill(probe)
+        val node = composeRule.onNodeWithText(probe)
+        node.assertIsDisplayed()
+        val widthPx = node.fetchSemanticsNode().boundsInRoot.width
+        val widthDp = with(composeRule.density) { widthPx.toDp() }
+        assertTrue(
+            "label wrapped/clipped to $widthDp (needs >= 45dp)",
+            widthDp.value >= 45f,
+        )
     }
 }
