@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -539,43 +540,60 @@ internal fun PillControlButton(
     onHold: (Boolean) -> Unit,
 ) {
     var pressed by remember { mutableStateOf(false) }
-    // The placement square is spec.sizeDp on a side; the pill
-    // itself is half as tall and sits centred in it, so its centre
-    // lands exactly on the layout fraction. The pill's width grows
-    // to fit the label (min the placement size): the old fixed
-    // 64 dp width with 20 dp of horizontal padding left 24 dp for
-    // a 13 sp label, so START / SELECT wrapped and clipped into
-    // unreadable fragments ("CT" / "CEI" on device, Phase 1.2).
-    Box(
-        modifier = Modifier.size(spec.sizeDp.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .height((spec.sizeDp / 2).dp)
-                .widthIn(min = spec.sizeDp.dp)
-                .alpha(alpha)
-                .clip(RoundedCornerShape(12.dp))
-                .background(
-                    if (pressed) DotSkin.Silver else DotSkin.ControlDark,
+    // The placement square is spec.sizeDp on a side, and the pill
+    // is centred on it, so its centre lands exactly on the layout
+    // fraction. The square is only the anchor: the pill's width
+    // grows to fit the label (min the placement size), measured
+    // against the overlay's own constraints — a plain Box would cap
+    // the pill at the square's width, and the old fixed 64 dp pill
+    // with 20 dp of horizontal padding left 24 dp for a 13 sp
+    // label, so START / SELECT wrapped and clipped into unreadable
+    // fragments ("CT" / "CEI" on device, Phase 1.2). A wider pill
+    // overflows the square equally on both sides, centre unchanged.
+    // (No size modifier on the Layout: it must see the overlay's
+    // constraints, and it reports the square as its own size.)
+    Layout(
+        content = {
+            Box(
+                modifier = Modifier
+                    .height((spec.sizeDp / 2).dp)
+                    .widthIn(min = spec.sizeDp.dp)
+                    .alpha(alpha)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (pressed) DotSkin.Silver else DotSkin.ControlDark,
+                    )
+                    .holdButton(
+                        enabled = enabled,
+                        onDown = { pressed = true; onHold(true) },
+                        onUp = { pressed = false; onHold(false) },
+                    )
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Label in muted silver-grey; pressed is silver with a
+                // dark label (§4.1). Single line, never wrapped: the
+                // pill is wide enough to hold it whole.
+                Text(
+                    label,
+                    color = if (pressed) DotSkin.TextOnSilver else DotSkin.TextMuted,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    softWrap = false,
                 )
-                .holdButton(
-                    enabled = enabled,
-                    onDown = { pressed = true; onHold(true) },
-                    onUp = { pressed = false; onHold(false) },
-                )
-                .padding(horizontal = 10.dp, vertical = 4.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            // Label in muted silver-grey; pressed is silver with a
-            // dark label (§4.1). Single line, never wrapped: the
-            // pill is wide enough to hold it whole.
-            Text(
-                label,
-                color = if (pressed) DotSkin.TextOnSilver else DotSkin.TextMuted,
-                fontSize = 13.sp,
-                maxLines = 1,
-                softWrap = false,
+            }
+        },
+    ) { measurables, constraints ->
+        // Measure the pill against the overlay's width, not the
+        // square's: it may grow wider than the square.
+        val pill = measurables.first().measure(
+            constraints.copy(minWidth = 0, minHeight = 0),
+        )
+        val squarePx = with(density) { spec.sizeDp.dp.roundToPx() }
+        layout(squarePx, squarePx) {
+            pill.place(
+                x = (squarePx - pill.width) / 2,
+                y = (squarePx - pill.height) / 2,
             )
         }
     }
