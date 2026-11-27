@@ -119,6 +119,12 @@ fun GameScreen(
             // The test-pattern diagnostic flag, read live on every
             // frame (Developer toggle, default off).
             testPattern = { prefs.getBoolean("dev_test_pattern", false) },
+            // The direct-to-screen pattern flag, read live on every
+            // frame (Developer toggle, default off). Bypasses the
+            // whole chain: if this pattern shows and the
+            // through-chain pattern does not, the chain's output is
+            // the fault; if neither shows, the surface path is.
+            directPattern = { prefs.getBoolean("dev_direct_pattern", false) },
         )
     }
     // A view-creation failure (no GLES 3.0) is set synchronously in
@@ -355,6 +361,13 @@ fun GameScreen(
             liveFps = Benchmark.liveFps
             drawStatsOn = prefs.getBoolean("dev_draw_stats", false)
             if (drawStatsOn) drawStatsText = GlDrawStats.snapshot()
+            // The two surface-path diagnostics are applied live so
+            // they can be switched without leaving the game: the
+            // direct pattern flips the GL view to continuous
+            // rendering, and the media-overlay toggle re-orders the
+            // surface against the window.
+            glView.setDirectPatternMode(prefs.getBoolean("dev_direct_pattern", false))
+            glView.setMediaOverlay(prefs.getBoolean("dev_media_overlay", false))
             capturing = Benchmark.isCapturing()
             captureProgress = Benchmark.captureProgress()
             benchStats = Benchmark.liveStats()

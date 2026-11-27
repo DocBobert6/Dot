@@ -145,6 +145,15 @@ fun SettingsScreen(
     var devDrawStats by remember {
         mutableStateOf(prefs.getBoolean("dev_draw_stats", false))
     }
+    // Surface-path diagnostics (§1.8): the direct-to-screen
+    // pattern and the media-overlay z-order experiment. Both
+    // default off; the player re-reads them live.
+    var devDirectPattern by remember {
+        mutableStateOf(prefs.getBoolean("dev_direct_pattern", false))
+    }
+    var devMediaOverlay by remember {
+        mutableStateOf(prefs.getBoolean("dev_media_overlay", false))
+    }
 
     // The notice clears itself after a few seconds.
     LaunchedEffect(notice) {
@@ -632,6 +641,38 @@ fun SettingsScreen(
             "Shows the live draw counts on the player screen " +
                 "(attempted, drawn, skipped, surface, latch) so they " +
                 "can be read without opening Settings. Off by default.",
+        )
+        ToggleRow(
+            label = "Direct pattern (diagnostic)",
+            checked = devDirectPattern,
+            onChange = { checked ->
+                devDirectPattern = checked
+                prefs.edit().putBoolean("dev_direct_pattern", checked).apply()
+            },
+        )
+        HelpText(
+            "Diagnostic only: draws the same magenta/cyan " +
+                "checkerboard straight to the screen with a trivial " +
+                "shader, bypassing the whole graphics chain. If this " +
+                "pattern shows and the through-chain pattern does " +
+                "not, the chain's output is the fault; if neither " +
+                "shows, the surface path is. Off by default. Turn " +
+                "it off to play.",
+        )
+        ToggleRow(
+            label = "Media overlay (diagnostic)",
+            checked = devMediaOverlay,
+            onChange = { checked ->
+                devMediaOverlay = checked
+                prefs.edit().putBoolean("dev_media_overlay", checked).apply()
+            },
+        )
+        HelpText(
+            "Diagnostic only: puts the game surface above the " +
+                "window (setZOrderMediaOverlay). If the picture " +
+                "appears with this on, the surface was sitting below " +
+                "an opaque window. Off by default. Not a fix on its " +
+                "own — report what it shows.",
         )
 
         // -- About (§1.9) ----------------------------------------------
