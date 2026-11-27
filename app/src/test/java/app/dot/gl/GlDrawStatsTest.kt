@@ -64,6 +64,7 @@ class GlDrawStatsTest {
     fun resetClearsEverything() {
         GlDrawStats.noteAttempt()
         GlDrawStats.noteDrawn()
+        GlDrawStats.noteDirectDrawn()
         GlDrawStats.noteCharcoal(CharcoalReason.Surface)
         GlDrawStats.noteSurface(1080, 972)
         GlDrawStats.noteLatchFailed()
@@ -71,6 +72,7 @@ class GlDrawStatsTest {
         assertEquals(
             "Draws attempted: 0\n" +
                 "Draws shown: 0\n" +
+                "Direct draws: 0\n" +
                 "Charcoal draws: 0 (latch: 0, surface: 0, area: 0)\n" +
                 "Frames skipped (unchanged): 0\n" +
                 "Frames with no pending frame: 0\n" +
@@ -79,5 +81,19 @@ class GlDrawStatsTest {
                 "Latch failed: no",
             GlDrawStats.snapshot(),
         )
+    }
+
+    @Test
+    fun directDrawsCountSeparately() {
+        // A direct-pattern draw is counted apart from chain draws,
+        // so the snapshot can never confuse a diagnostic draw with
+        // a game picture — and the reset clears it too.
+        GlDrawStats.noteDirectDrawn()
+        GlDrawStats.noteDirectDrawn()
+        val text = GlDrawStats.snapshot()
+        assertTrue(text.contains("Direct draws: 2"))
+        assertTrue(text.contains("Draws shown: 0"))
+        GlDrawStats.reset()
+        assertTrue(GlDrawStats.snapshot().contains("Direct draws: 0"))
     }
 }

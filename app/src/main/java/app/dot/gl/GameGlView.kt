@@ -40,6 +40,8 @@ class GameGlView @JvmOverloads constructor(
     private val onGlFailed: ((where: String, program: String, e: Throwable) -> Unit)? = null,
     /** The test-pattern diagnostic flag (Developer toggle, default off). Read live on every frame. */
     private val testPattern: () -> Boolean = { false },
+    /** The direct-pattern diagnostic flag (Developer toggle, default off). Read live on every frame. */
+    private val directPattern: () -> Boolean = { false },
 ) : GLSurfaceView(context, attrs), GlChainHost {
 
     private val gate = FrameRenderGate()
@@ -47,6 +49,9 @@ class GameGlView @JvmOverloads constructor(
 
     /** The delivery gate (FrameDeliveryGate): an unchanged frame is dropped here, before the render gate. */
     private val deliveryGate = FrameDeliveryGate()
+
+    /** The direct-pattern render mode, as last applied. */
+    private var directModeOn = false
 
     /** The test-pattern flag as last seen by postFrame (toggle-change detection). */
     private var lastPatternOn = testPattern()
@@ -75,7 +80,7 @@ class GameGlView @JvmOverloads constructor(
             setEGLContextClientVersion(3)
             setEGLConfigChooser(8, 8, 8, 8, 0, 0)
             preserveEGLContextOnPause = true
-            created = GlRenderer(context, this, pictureTarget, testPattern)
+            created = GlRenderer(context, this, pictureTarget, testPattern, directPattern)
             setRenderer(created)
             renderMode = RENDERMODE_WHEN_DIRTY
         } catch (e: Throwable) {
@@ -168,6 +173,41 @@ class GameGlView @JvmOverloads constructor(
         if (gate.onFrameLanded()) {
             requestRenderIfReady()
         }
+    }
+
+    /**
+     * Applies the direct-pattern diagnostic mode (Phase 1.5):
+     * continuous rendering while the direct pattern is on, so it
+     * redraws every vsync whether or not the game delivers frames;
+     * on-demand rendering again when it turns off. The delivery
+     * gate is invalidated on any change: turning the pattern off
+     * must re-draw the game frame, which would otherwise be
+     * suppressed as unchanged (its hash matches the last delivered
+     * game frame) while the last presented buffer still holds the
+     * pattern. Called from the player screen's settings poll, on
+     * the main thread; setRenderMode is thread-safe.
+     */
+    fun setDirectPatternMode(on: Boolean) {
+        if (on == directModeOn) return
+        directModeOn = on
+        deliveryGate.invalidate()
+        renderMode = if (on) RENDERMODE_CONTINUOUSLY else RENDERMODE_WHEN_DIRTY
+        Log.d(TAG, "DotGl: direct pattern ${if (on) "ON — continuous rendering" else "OFF — on-demand rendering"}")
+    }
+
+    /**
+     * Applies the media-overlay z-order diagnostic (Phase 1.5):
+     * the surface is placed above the app window instead of below
+     * it. If the picture appears with this on, the window was
+     * covering the surface (the hole-punch is the fault). The
+     * on-screen draw stats hide while it is on — they are window
+     * content, under the surface. The framework recreates the
+     * surface when the order changes (see the surfaceCreated /
+     * surfaceDestroyed logs). Diagnostic only, never a silent fix.
+     */
+    fun setMediaOverlay(on: Boolean) {
+        setZOrderMediaOverlay(on)
+        Log.d(TAG, "DotGl: media overlay ${if (on) "ON" else "OFF"}")
     }
 
     /**

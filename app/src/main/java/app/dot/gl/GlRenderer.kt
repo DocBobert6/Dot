@@ -71,6 +71,8 @@ class GlRenderer(
     private val pictureTarget: () -> String,
     /** The test-pattern diagnostic flag (Developer toggle, default off). Read live on every frame. */
     private val testPattern: () -> Boolean = { false },
+    /** The direct-pattern diagnostic flag (Developer toggle, default off). Read live on every frame. */
+    private val directPattern: () -> Boolean = { false },
 ) : GLSurfaceView.Renderer {
 
     companion object {
@@ -193,6 +195,20 @@ class GlRenderer(
         } else if (attempts % 300L == 0L) {
             Log.d(TAG, "DotGl: ${GlDrawStats.snapshot().replace("\n", " | ")}")
         }
+        // The direct-pattern diagnostic (Phase 1.5): a checkerboard
+        // computed in the fragment shader, drawn straight to the
+        // default framebuffer — no texture upload, no FBO pass, no
+        // chain. It runs FIRST, before the latch check and before
+        // any pending frame is read, and it needs no pending frame:
+        // that is the point — if the direct pattern shows while the
+        // game does not, the chain's output is at fault; if the
+        // direct pattern does not show either, the surface, the
+        // swap, or the composition is at fault. A latched (failed)
+        // chain must not block it.
+        if (directPattern()) {
+            drawDirectPattern()
+            return
+        }
         if (latch.isFailed) {
             GlDrawStats.noteCharcoal(CharcoalReason.Latch)
             clearCharcoalFull()
@@ -248,6 +264,73 @@ class GlRenderer(
             failGl("frame", "unknown", e)
         } finally {
             host.onDrawDurationNanos(System.nanoTime() - startNanos)
+        }
+    }
+
+    /**
+     * The direct-pattern diagnostic (Phase 1.5): the in-shader
+     * magenta/cyan checkerboard, drawn straight to the default
+     * framebuffer in the same centred on-screen rect the RCAS
+     * pass uses — no texture upload, no FBO pass, no chain pass.
+     * A failure here still fails loudly through the normal path.
+     * It does NOT tick the benchmark's presented clock: that clock
+     * is for game frames, and a diagnostic draw is not one.
+     */
+    private fun drawDirectPattern() {
+        if (surfaceWidth <= 0 || surfaceHeight <= 0) return
+        val targetHeight = resolveTargetHeight()
+        val onScreen = onScreenGameArea(targetHeight)
+        if (onScreen.first <= 0 || onScreen.second <= 0) return
+        val offsetX = (surfaceWidth - onScreen.first) / 2
+        val offsetY = (surfaceHeight - onScreen.second) / 2
+        try {
+            runPass(
+                vert = "dot-common.vert", frag = "direct.frag",
+                inputTex = 0, inputW = SRC_W, inputH = SRC_H,
+                outFbo = 0, outW = onScreen.first, outH = onScreen.second,
+                viewportX = offsetX, viewportY = offsetY,
+            )
+            GlDrawStats.noteDirectDrawn()
+            if (GlDrawStats.directDrawnCount() == 1L) {
+                Log.d(TAG, "DotGl: first direct pattern drew surface=${surfaceWidth}x${surfaceHeight}")
+            }
+            probePresentedPixel("direct")
+        } catch (e: Throwable) {
+            failGl("direct-pattern", "direct.frag", e)
+        }
+    }
+
+    /**
+     * The presented-pixel probe (Phase 1.5): reads the centre pixel
+     * of the back buffer immediately after a draw, before
+     * GLSurfaceView swaps it to the screen — the colour the swap
+     * is about to present. Throttled (first draw of each kind, then
+     * every 300th attempt): a readback on every frame would stall
+     * the pipeline. A probe that reads the pattern/game colours
+     * proves the draw wrote pixels; a probe that reads black proves
+     * the chain output is black. Either way, what the swap presents
+     * is now on record in the next bug report — GLSurfaceView owns
+     * the swap itself, and its own failures log under its own tag.
+     */
+    private fun probePresentedPixel(where: String) {
+        val attempts = GlDrawStats.attemptedCount()
+        val firstDirect = where == "direct" && GlDrawStats.directDrawnCount() == 1L
+        val firstChain = where == "chain" && GlDrawStats.drawnCount() == 1L
+        if (!firstDirect && !firstChain && attempts % 300L != 0L) return
+        try {
+            val px = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder())
+            GLES30.glReadPixels(
+                surfaceWidth / 2, surfaceHeight / 2, 1, 1,
+                GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, px,
+            )
+            Log.d(
+                TAG,
+                "DotGl: presented-pixel $where rgba=(${px.get(0).toInt() and 0xFF}," +
+                    "${px.get(1).toInt() and 0xFF},${px.get(2).toInt() and 0xFF}," +
+                    "${px.get(3).toInt() and 0xFF}) surface=${surfaceWidth}x${surfaceHeight}",
+            )
+        } catch (e: Throwable) {
+            Log.d(TAG, "DotGl: presented-pixel probe failed: ${e.message}")
         }
     }
 
@@ -462,6 +545,7 @@ class GlRenderer(
             flipped = flip, blueNoise = true,
         )
         frameCount++
+        probePresentedPixel("chain")
         checkGl("chain")
         return null
     }

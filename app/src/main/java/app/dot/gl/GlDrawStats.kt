@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicLong
 object GlDrawStats {
     private val attempted = AtomicLong(0)
     private val drawn = AtomicLong(0)
+    private val directDrawn = AtomicLong(0)
     private val charcoalLatch = AtomicLong(0)
     private val charcoalSurface = AtomicLong(0)
     private val charcoalArea = AtomicLong(0)
@@ -31,6 +32,7 @@ object GlDrawStats {
     fun reset() {
         attempted.set(0)
         drawn.set(0)
+        directDrawn.set(0)
         charcoalLatch.set(0)
         charcoalSurface.set(0)
         charcoalArea.set(0)
@@ -55,6 +57,19 @@ object GlDrawStats {
 
     /** Frames that actually drew so far (for the first-draw log). */
     fun drawnCount(): Long = drawn.get()
+
+    /**
+     * A direct-pattern draw (Phase 1.5): the in-shader
+     * checkerboard straight to the screen, bypassing the chain.
+     * Counted separately from chain draws, so the snapshot can
+     * never confuse a diagnostic draw with a game picture.
+     */
+    fun noteDirectDrawn() {
+        directDrawn.incrementAndGet()
+    }
+
+    /** Direct-pattern draws so far (for the first-draw log). */
+    fun directDrawnCount(): Long = directDrawn.get()
 
     fun noteCharcoal(reason: CharcoalReason) {
         when (reason) {
@@ -100,6 +115,7 @@ object GlDrawStats {
     fun snapshot(): String = listOf(
         "Draws attempted: ${attempted.get()}",
         "Draws shown: ${drawn.get()}",
+        "Direct draws: ${directDrawn.get()}",
         "Charcoal draws: ${charcoalTotal()} " +
             "(latch: ${charcoalLatch.get()}, " +
             "surface: ${charcoalSurface.get()}, " +
