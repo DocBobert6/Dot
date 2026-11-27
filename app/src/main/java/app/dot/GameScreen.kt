@@ -94,8 +94,14 @@ fun GameScreen(
     val prefs = remember {
         context.getSharedPreferences("dot-settings", Context.MODE_PRIVATE)
     }
+    // The render-resolution choice (Settings → Display, §1.9):
+    // read from the SAME key Settings writes ("render_resolution").
+    // The player used to read "picture_target" here — a key nothing
+    // ever wrote — so the Auto/1080p/4K choice never took effect
+    // and the player always ran Auto. Unifying on the Settings key
+    // (1.5) makes the choice actually reach the player.
     val pictureSetting = remember {
-        prefs.getString("picture_target", "auto") ?: "auto"
+        prefs.getString("render_resolution", "auto") ?: "auto"
     }
     var glError by remember { mutableStateOf<String?>(null) }
     val glView = remember(entry.sha256) {
