@@ -4,6 +4,7 @@ import android.content.Context
 import android.opengl.GLSurfaceView
 import android.os.Build
 import android.util.AttributeSet
+import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import app.dot.Benchmark
@@ -37,10 +38,21 @@ class GameGlView @JvmOverloads constructor(
     private val appVersion: String = "app.dot",
     /** Called (main thread) when the GL chain fails. */
     private val onGlFailed: ((where: String, program: String, e: Throwable) -> Unit)? = null,
+    /** The test-pattern diagnostic flag (Developer toggle, default off). Read live on every frame. */
+    private val testPattern: () -> Boolean = { false },
 ) : GLSurfaceView(context, attrs), GlChainHost {
 
     private val gate = FrameRenderGate()
     private val pendingFrame = AtomicReference<GlFrame?>(null)
+
+    /** The delivery gate (FrameDeliveryGate): an unchanged frame is dropped here, before the render gate. */
+    private val deliveryGate = FrameDeliveryGate()
+
+    /** The test-pattern flag as last seen by postFrame (toggle-change detection). */
+    private var lastPatternOn = testPattern()
+
+    /** Set once the first frame has been delivered (first-frame log). */
+    @Volatile private var firstFrameLogged = false
 
     /** The latest chain label (what actually drew), for benchmarks and reports. */
     @Volatile var chainLabel: String = "gl:deband>dither-invert>deflicker>scalefx3x+raa>sharp-bilinear>rcas"
@@ -63,7 +75,7 @@ class GameGlView @JvmOverloads constructor(
             setEGLContextClientVersion(3)
             setEGLConfigChooser(8, 8, 8, 8, 0, 0)
             preserveEGLContextOnPause = true
-            created = GlRenderer(context, this, pictureTarget)
+            created = GlRenderer(context, this, pictureTarget, testPattern)
             setRenderer(created)
             renderMode = RENDERMODE_WHEN_DIRTY
         } catch (e: Throwable) {
@@ -74,6 +86,7 @@ class GameGlView @JvmOverloads constructor(
         // surface may not exist yet; the callback fires on creation.
         holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
+                Log.d(TAG, "DotGl: surfaceCreated")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     try {
                         holder.surface.setFrameRate(
@@ -89,28 +102,65 @@ class GameGlView @JvmOverloads constructor(
             override fun surfaceChanged(
                 holder: SurfaceHolder, format: Int, width: Int, height: Int,
             ) {
+                // The format is what the next bug report settles the
+                // EGL-config question with: the chooser asks for
+                // 8,8,8,8,0,0, but the 1.3 report showed format 4
+                // (RGB_565) here.
+                Log.d(TAG, "DotGl: surfaceChanged format=$format ${width}x$height")
             }
 
-            override fun surfaceDestroyed(holder: SurfaceHolder) {}
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                Log.d(TAG, "DotGl: surfaceDestroyed")
+            }
         })
     }
 
     /**
-     * Posts a frame (emu thread). The gate's frameComplete side.
+     * Posts a frame (emu thread). Returns true when the frame was
+     * delivered to the render gate, false when it was dropped as
+     * unchanged.
      *
-     * The gate's return value is load-bearing: whichever side
-     * completes a frame's pair requests the render. A previous
-     * version discarded this value here, and a one-frame slip
-     * between the emu, main, and GL threads wedged the gate
-     * permanently — the pair completed on this side with no
-     * render requested, so no draw ever re-armed it (the Phase 1
-     * black screen on device, v0.1.0-phase1.1). Never discard it.
+     * The delivery gate is the Phase 1.4 fix for the on-device
+     * flashing: GLSurfaceView swaps buffers after EVERY
+     * onDrawFrame, including the ones that draw nothing, so the
+     * 316 hash-skips in the 1.3 counts each swapped a stale buffer
+     * and the screen cycled them. An unchanged frame is dropped
+     * here, before the gate, so no onDrawFrame and no swap happens
+     * for a static frame.
+     *
+     * The gate's return value is load-bearing (the 1.2 fix):
+     * whichever side completes a frame's pair requests the render.
+     * A previous version discarded this value here, and a
+     * one-frame slip between the emu, main, and GL threads wedged
+     * the gate permanently — the pair completed on this side with
+     * no render requested, so no draw ever re-armed it (the Phase
+     * 1 black screen on device, v0.1.0-phase1.1). Never discard it.
      */
-    fun postFrame(frame: GlFrame) {
+    fun postFrame(frame: GlFrame): Boolean {
+        // A test-pattern toggle change forces the next frame
+        // through: the pattern draws instead of the game, so the
+        // gate's hash (which keys on the game frame) must not
+        // suppress it — and turning the pattern off must re-draw
+        // the game frame.
+        val patternOn = testPattern()
+        if (patternOn != lastPatternOn) {
+            lastPatternOn = patternOn
+            deliveryGate.invalidate()
+            Log.d(TAG, "DotGl: test pattern ${if (patternOn) "ON" else "OFF"} — delivery gate reset")
+        }
+        if (!deliveryGate.deliverIfChanged(frame.hash)) {
+            GlDrawStats.noteHashSkipped()
+            return false
+        }
+        if (!firstFrameLogged) {
+            firstFrameLogged = true
+            Log.d(TAG, "DotGl: first frame delivered hash=${frame.hash}")
+        }
         pendingFrame.set(frame)
         if (gate.onFrameComplete()) {
             requestRenderIfReady()
         }
+        return true
     }
 
     /** Reports that the posted frame has landed (main thread). Requests a render iff this completes the frame. */
@@ -144,6 +194,11 @@ class GameGlView @JvmOverloads constructor(
         return frame
     }
 
+    override fun onDeliveryInvalidated(reason: String) {
+        deliveryGate.invalidate()
+        Log.d(TAG, "DotGl: delivery gate invalidated ($reason)")
+    }
+
     override fun onGlFailed(where: String, program: String, e: Throwable) {
         glError = "Graphics failure ($where): ${e.message}"
         onGlFailed?.invoke(where, program, e)
@@ -172,4 +227,8 @@ class GameGlView @JvmOverloads constructor(
     override fun glFailureGameTitle(): String? = gameTitle
 
     override fun glFailureAppVersion(): String = appVersion
+
+    companion object {
+        private const val TAG = "DotGl"
+    }
 }

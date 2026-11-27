@@ -137,6 +137,14 @@ fun SettingsScreen(
     var hasCustomDefault by remember {
         mutableStateOf(LayoutStore.hasCustomDefault(filesDir))
     }
+    // Developer diagnostics (§1.8): the test pattern and the live
+    // draw stats. Both default off; the player re-reads them live.
+    var devTestPattern by remember {
+        mutableStateOf(prefs.getBoolean("dev_test_pattern", false))
+    }
+    var devDrawStats by remember {
+        mutableStateOf(prefs.getBoolean("dev_draw_stats", false))
+    }
 
     // The notice clears itself after a few seconds.
     LaunchedEffect(notice) {
@@ -596,6 +604,35 @@ fun SettingsScreen(
             Text("Import trace")
             Button(onClick = onOpenTrace) { Text("Open") }
         }
+        Spacer(Modifier.height(8.dp))
+        ToggleRow(
+            label = "Test pattern (diagnostic)",
+            checked = devTestPattern,
+            onChange = { checked ->
+                devTestPattern = checked
+                prefs.edit().putBoolean("dev_test_pattern", checked).apply()
+            },
+        )
+        HelpText(
+            "Diagnostic only: replaces the game picture with a bright " +
+                "magenta/cyan checkerboard through the same graphics " +
+                "chain, to tell a broken surface apart from a broken " +
+                "picture. Off by default. Never a substitute for the " +
+                "game picture — turn it off to play.",
+        )
+        ToggleRow(
+            label = "Live draw stats (diagnostic)",
+            checked = devDrawStats,
+            onChange = { checked ->
+                devDrawStats = checked
+                prefs.edit().putBoolean("dev_draw_stats", checked).apply()
+            },
+        )
+        HelpText(
+            "Shows the live draw counts on the player screen " +
+                "(attempted, drawn, skipped, surface, latch) so they " +
+                "can be read without opening Settings. Off by default.",
+        )
 
         // -- About (§1.9) ----------------------------------------------
         SectionHeader("About")

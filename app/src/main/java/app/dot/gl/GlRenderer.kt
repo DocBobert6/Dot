@@ -7,7 +7,9 @@ import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import javax.microedition.khronos.egl.EGL10
 import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.egl.EGLContext
 import javax.microedition.khronos.opengles.GL10
 
 // Dot — the GL picture chain renderer (GL-CHAIN-SPEC §1, §2, §9).
@@ -45,6 +47,14 @@ interface GlChainHost {
     /** Reads and clears the pending frame; re-arms the render gate. Null when no frame is pending. */
     fun takePendingFrame(): GlFrame?
     /**
+     * A delivered frame did not draw (charcoal), or the surface
+     * was rebuilt: the next identical frame must be delivered
+     * again, or the delivery gate would suppress it forever (the
+     * 1.2 charcoal poisoning, moved upstream). The default is a
+     * no-op so test hosts need not implement it.
+     */
+    fun onDeliveryInvalidated(reason: String) {}
+    /**
      * Called after a frame actually drew (not on a charcoal
      * early-return, not on a hash-match skip): the presented-frame
      * tick for the benchmark's presented clock and the live FPS
@@ -59,6 +69,8 @@ class GlRenderer(
     private val host: GlChainHost,
     /** Returns the picture target: "1080p", "4k", or "auto". */
     private val pictureTarget: () -> String,
+    /** The test-pattern diagnostic flag (Developer toggle, default off). Read live on every frame. */
+    private val testPattern: () -> Boolean = { false },
 ) : GLSurfaceView.Renderer {
 
     companion object {
@@ -118,6 +130,7 @@ class GlRenderer(
     // ---- GLSurfaceView.Renderer --------------------------------------
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        val t0 = System.nanoTime()
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         gpuString = GLES30.glGetString(GLES30.GL_RENDERER)
@@ -138,6 +151,15 @@ class GlRenderer(
         GlDrawStats.reset()
         buildQuads()
         buildPersistentTextures()
+        // The setup cost and the config actually chosen, for the
+        // next bug report: the programs compile lazily on the first
+        // draw (see getProgram), so this setup time plus the first
+        // draw time is what the ~3 s first-redraw lag in the 1.3
+        // bug report is made of.
+        val setupMs = (System.nanoTime() - t0) / 1_000_000
+        Log.d(TAG, "DotGl: surface created gpu=$gpuString setup=${setupMs}ms")
+        logEglConfig(config)
+        host.onDeliveryInvalidated("surface-created")
         // Clear the latch LAST: if anything above threw, it stays set.
         latch.clearOnSurfaceRebuilt()
     }
@@ -149,6 +171,9 @@ class GlRenderer(
         // only ever drew charcoal on a 0-sized surface must draw
         // for real now, even with the identical hash.
         drawDecision.onSurfaceSized(width, height)
+        if (width > 0 && height > 0) {
+            host.onDeliveryInvalidated("surface-sized")
+        }
         GlDrawStats.noteSurface(width, height)
         // The game target depends on surface size: drop every pooled
         // target (a stale pool across a change corrupts the chain).
@@ -158,6 +183,16 @@ class GlRenderer(
 
     override fun onDrawFrame(gl: GL10?) {
         GlDrawStats.noteAttempt()
+        // The frame path, throttled to one line per 300 attempts
+        // (about every 5 s at 60 fps): delivered/drawn/skipped,
+        // so the next bug report shows the counts without a
+        // benchmark run.
+        val attempts = GlDrawStats.attemptedCount()
+        if (attempts == 1L) {
+            Log.d(TAG, "DotGl: first onDrawFrame surface=${surfaceWidth}x${surfaceHeight}")
+        } else if (attempts % 300L == 0L) {
+            Log.d(TAG, "DotGl: ${GlDrawStats.snapshot().replace("\n", " | ")}")
+        }
         if (latch.isFailed) {
             GlDrawStats.noteCharcoal(CharcoalReason.Latch)
             clearCharcoalFull()
@@ -181,11 +216,14 @@ class GlRenderer(
             )
             if (reason != null) {
                 GlDrawStats.noteCharcoal(reason)
+                host.onDeliveryInvalidated("charcoal-${reason.name}")
                 clearCharcoalFull()
                 return
             }
             // Static-frame reuse (GL-CHAIN-SPEC §8.4): an unchanged
             // frame needs no re-render; the previous output stays.
+            // (The delivery gate normally stops such a frame before
+            // it reaches here — this is the backstop.)
             if (!drawDecision.needsDraw(frame.hash)) {
                 GlDrawStats.noteHashSkipped()
                 return
@@ -197,9 +235,14 @@ class GlRenderer(
             if (drawReason == null) {
                 drawDecision.markDrawn(frame.hash)
                 GlDrawStats.noteDrawn()
+                if (GlDrawStats.drawnCount() == 1L) {
+                    val ms = (System.nanoTime() - startNanos) / 1_000_000
+                    Log.d(TAG, "DotGl: first frame drew hash=${frame.hash} in ${ms}ms")
+                }
                 host.onFramePresented()
             } else {
                 GlDrawStats.noteCharcoal(drawReason)
+                host.onDeliveryInvalidated("charcoal-${drawReason.name}")
             }
         } catch (e: Throwable) {
             failGl("frame", "unknown", e)
@@ -238,14 +281,23 @@ class GlRenderer(
             internal.second > onScreen.second
         val inversionOn = true // Locked ON in Phase 1.
 
-        // The chain label names what actually drew (§1.1).
-        host.onChainLabel(ChainParity.chainLabel(useMitchell))
+        // The chain label names what actually drew (§1.1). The
+        // test-pattern diagnostic appends its mark, so a benchmark
+        // or failure report can never be mistaken for a game
+        // picture.
+        val patternOn = testPattern()
+        val label = ChainParity.chainLabel(useMitchell)
+        host.onChainLabel(if (patternOn) "$label + test-pattern" else label)
 
         pool.beginFrame()
         val exclude = if (historyTargetId >= 0) setOf(historyTargetId) else emptySet()
 
         // 1. Deband the raw plane on CPU, upload as the source texture.
-        val debanded = Deband.deband(frame.argb)
+        // The test-pattern diagnostic enters here instead: its fixed
+        // pixels go through the same uploadSource -> chain -> screen
+        // path, but the CPU deband is skipped (it would re-interpret
+        // the pattern's colours as a gradient).
+        val debanded = if (patternOn) TestPattern.ARGB else Deband.deband(frame.argb)
         uploadSource(debanded)
         uploadMask(frame.deflickerMask)
 
@@ -653,6 +705,10 @@ class GlRenderer(
     private fun getProgram(vertAsset: String, fragAsset: String): Int {
         val key = vertAsset to fragAsset
         programs[key]?.let { return it }
+        // Programs compile lazily on the first draw, not in
+        // onSurfaceCreated: this is the per-program time the ~3 s
+        // first-redraw lag in the 1.3 bug report is made of.
+        val t0 = System.nanoTime()
         val vertSrc = context.assets.open("shaders/$vertAsset").readBytes().toString(Charsets.UTF_8)
         val fragSrc = context.assets.open("shaders/$fragAsset").readBytes().toString(Charsets.UTF_8)
         val vert = compileShader(GLES30.GL_VERTEX_SHADER, vertAsset, vertSrc)
@@ -668,6 +724,8 @@ class GlRenderer(
             GLES30.glDeleteProgram(program)
             throw IllegalStateException("Program link failed ($vertAsset + $fragAsset): $log")
         }
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        Log.d(TAG, "DotGl: program $vertAsset + $fragAsset compiled+linked in ${ms}ms")
         GLES30.glDeleteShader(vert)
         GLES30.glDeleteShader(frag)
         programs[key] = program
@@ -813,6 +871,34 @@ class GlRenderer(
         val err = GLES30.glGetError()
         if (err != GLES30.GL_NO_ERROR) {
             Log.w(TAG, "GL error after $where: $err")
+        }
+    }
+
+    /**
+     * Logs the EGL config actually chosen (red/green/blue/alpha
+     * bits), so the next bug report settles whether it matches the
+     * surface format: the chooser asks for 8,8,8,8,0,0, but the
+     * 1.3 bug report showed the surface format as 4 (RGB_565).
+     * Logging only — a query failure never breaks drawing.
+     */
+    private fun logEglConfig(config: EGLConfig?) {
+        try {
+            val egl = EGLContext.getEGL() as? EGL10 ?: return
+            val display = egl.eglGetCurrentDisplay() ?: return
+            val cfg = config ?: return
+            fun attr(name: Int): Int {
+                val v = IntArray(1)
+                return if (egl.eglGetConfigAttrib(display, cfg, name, v)) v[0] else -1
+            }
+            Log.d(
+                TAG,
+                "DotGl: EGL config R${attr(EGL10.EGL_RED_SIZE)} " +
+                    "G${attr(EGL10.EGL_GREEN_SIZE)} B${attr(EGL10.EGL_BLUE_SIZE)} " +
+                    "A${attr(EGL10.EGL_ALPHA_SIZE)} depth=${attr(EGL10.EGL_DEPTH_SIZE)} " +
+                    "stencil=${attr(EGL10.EGL_STENCIL_SIZE)}",
+            )
+        } catch (e: Throwable) {
+            Log.d(TAG, "DotGl: EGL config query failed: ${e.message}")
         }
     }
 

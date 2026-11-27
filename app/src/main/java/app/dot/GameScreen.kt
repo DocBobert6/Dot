@@ -55,6 +55,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.dot.gl.GameGlView
+import app.dot.gl.GlDrawStats
 import app.dot.gl.GlFailureReport
 import kotlinx.coroutines.delay
 
@@ -115,6 +116,9 @@ fun GameScreen(
                 }
                 Thread({ session.stop() }, "dot-gl-fail-stop").start()
             },
+            // The test-pattern diagnostic flag, read live on every
+            // frame (Developer toggle, default off).
+            testPattern = { prefs.getBoolean("dev_test_pattern", false) },
         )
     }
     // A view-creation failure (no GLES 3.0) is set synchronously in
@@ -185,6 +189,14 @@ fun GameScreen(
         mutableStateOf(prefs.getBoolean("fps_counter", false))
     }
     var liveFps by remember { mutableStateOf(0.0) }
+    // Live draw stats (diagnostic, default off): the GlDrawStats
+    // snapshot on screen while playing, polled twice a second
+    // with the FPS counter. The setting is re-read each tick, so
+    // it applies live, not only on the next launch.
+    var drawStatsOn by remember {
+        mutableStateOf(prefs.getBoolean("dev_draw_stats", false))
+    }
+    var drawStatsText by remember { mutableStateOf("") }
 
     // The dot-matrix boot gesture (§7.8 item 5): Dot's own mark
     // when a game launches — short, non-blocking. The session runs
@@ -341,6 +353,8 @@ fun GameScreen(
         while (true) {
             fpsOn = prefs.getBoolean("fps_counter", false)
             liveFps = Benchmark.liveFps
+            drawStatsOn = prefs.getBoolean("dev_draw_stats", false)
+            if (drawStatsOn) drawStatsText = GlDrawStats.snapshot()
             capturing = Benchmark.isCapturing()
             captureProgress = Benchmark.captureProgress()
             benchStats = Benchmark.liveStats()
@@ -528,6 +542,23 @@ fun GameScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 8.dp),
+            )
+        }
+        // The live draw stats (diagnostic, default off): the
+        // GlDrawStats snapshot on the player screen, so the counts
+        // can be read without opening Settings. It sits over the
+        // game area's top-left corner and takes no touches.
+        if (drawStatsOn && state == PlayerSession.State.Running) {
+            Text(
+                drawStatsText,
+                color = Color.White,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 8.dp, top = 8.dp)
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(4.dp),
             )
         }
         if (message != null) {
