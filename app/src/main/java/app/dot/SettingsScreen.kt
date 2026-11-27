@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Vibrator
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.dot.gl.ChainStage
 import app.dot.gl.GlDrawStats
 import app.dot.gl.GlFailureReport
 import java.io.File
@@ -153,6 +155,15 @@ fun SettingsScreen(
     }
     var devMediaOverlay by remember {
         mutableStateOf(prefs.getBoolean("dev_media_overlay", false))
+    }
+    // Chain bisection diagnostics (§1.8): the stage selector and
+    // the per-stage centre-pixel probes. Both default off; the
+    // player re-reads them live.
+    var devChainStage by remember {
+        mutableStateOf(prefs.getString("dev_chain_stage", "off") ?: "off")
+    }
+    var devStageProbes by remember {
+        mutableStateOf(prefs.getBoolean("dev_stage_probes", false))
     }
 
     // The notice clears itself after a few seconds.
@@ -674,6 +685,38 @@ fun SettingsScreen(
                 "an opaque window. Off by default. Not a fix on its " +
                 "own — report what it shows.",
         )
+        ChoiceFlowRow(
+            label = "Chain stage (diagnostic)",
+            options = ChainStage.ORDER.map { it.pref to it.label },
+            selected = devChainStage,
+            onSelect = { value ->
+                devChainStage = value
+                prefs.edit().putString("dev_chain_stage", value).apply()
+            },
+        )
+        HelpText(
+            "Diagnostic only: runs the graphics chain only up to " +
+                "the chosen stage, then draws that stage's output " +
+                "straight to the screen. Off runs the full chain; " +
+                "RCAS is the full chain too (the control). Use with " +
+                "the test pattern on: a stage that shows the pattern " +
+                "is fine, the first stage that shows black is the " +
+                "fault. Off by default. Turn it off to play.",
+        )
+        ToggleRow(
+            label = "Stage probes (diagnostic)",
+            checked = devStageProbes,
+            onChange = { checked ->
+                devStageProbes = checked
+                prefs.edit().putBoolean("dev_stage_probes", checked).apply()
+            },
+        )
+        HelpText(
+            "Diagnostic only: reads the centre pixel after every " +
+                "chain pass and logs it (DotGl), and shows the line " +
+                "in the live draw stats — so the log names the first " +
+                "pass that outputs black. Off by default.",
+        )
 
         // -- About (§1.9) ----------------------------------------------
         SectionHeader("About")
@@ -910,6 +953,32 @@ private fun ChoiceRow(
         Text(label)
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((value, text) in options) {
+                if (value == selected) {
+                    Button(onClick = { onSelect(value) }) { Text(text) }
+                } else {
+                    OutlinedButton(onClick = { onSelect(value) }) { Text(text) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Like ChoiceRow, but the option buttons wrap onto more rows —
+ * the chain-stage selector has nine options, which never fit one
+ * row.
+ */
+private fun ChoiceFlowRow(
+    label: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(label)
+        Spacer(Modifier.height(4.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((value, text) in options) {
                 if (value == selected) {
                     Button(onClick = { onSelect(value) }) { Text(text) }

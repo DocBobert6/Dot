@@ -18,6 +18,7 @@ object GlDrawStats {
     private val attempted = AtomicLong(0)
     private val drawn = AtomicLong(0)
     private val directDrawn = AtomicLong(0)
+    private val bisectDrawn = AtomicLong(0)
     private val charcoalLatch = AtomicLong(0)
     private val charcoalSurface = AtomicLong(0)
     private val charcoalArea = AtomicLong(0)
@@ -42,6 +43,7 @@ object GlDrawStats {
         attempted.set(0)
         drawn.set(0)
         directDrawn.set(0)
+        bisectDrawn.set(0)
         charcoalLatch.set(0)
         charcoalSurface.set(0)
         charcoalArea.set(0)
@@ -80,6 +82,19 @@ object GlDrawStats {
 
     /** Direct-pattern draws so far (for the first-draw log). */
     fun directDrawnCount(): Long = directDrawn.get()
+
+    /**
+     * A bisection-bypass draw (Phase 1.6): a stage's target drawn
+     * straight to the screen. Counted only for the first-draw log
+     * throttle — the snapshot does not list it, so the empty
+     * snapshot is unchanged.
+     */
+    fun noteBisectDrawn() {
+        bisectDrawn.incrementAndGet()
+    }
+
+    /** Bisection-bypass draws so far (for the first-draw log). */
+    fun bisectDrawnCount(): Long = bisectDrawn.get()
 
     fun noteCharcoal(reason: CharcoalReason) {
         when (reason) {

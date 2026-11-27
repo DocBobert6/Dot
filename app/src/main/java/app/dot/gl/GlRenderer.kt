@@ -73,6 +73,10 @@ class GlRenderer(
     private val testPattern: () -> Boolean = { false },
     /** The direct-pattern diagnostic flag (Developer toggle, default off). Read live on every frame. */
     private val directPattern: () -> Boolean = { false },
+    /** The chain-stage bisection selector (Developer setting, default off). Read live on every frame. */
+    private val chainStage: () -> String = { "off" },
+    /** The per-stage centre-pixel probes (Developer toggle, default off). Read live on every frame. */
+    private val stageProbes: () -> Boolean = { false },
 ) : GLSurfaceView.Renderer {
 
     companion object {
@@ -128,6 +132,18 @@ class GlRenderer(
 
     /** The pure draw-decision state: owns lastHash, so a charcoal draw can never poison it. */
     private val drawDecision = DrawDecision()
+
+    /** The per-stage probes collected for the frame in flight (probeStage appends; flushStageProbes logs). */
+    private val frameProbes = mutableListOf<StageProbe>()
+
+    /** True when the stage probes should be read back for the frame in flight. */
+    private var doStageProbes = false
+
+    /** True when the probe toggle just turned on: the next frame probes immediately instead of waiting for the 300-attempt tick. */
+    private var stageProbeArmed = false
+
+    /** The probe toggle's last-seen value (toggle-change detection). */
+    private var lastStageProbesOn = false
 
     // ---- GLSurfaceView.Renderer --------------------------------------
 
@@ -248,6 +264,10 @@ class GlRenderer(
             // drawing (a guard firing after the pre-check, e.g. the
             // surface resized mid-draw): the hash stays unconsumed.
             val drawReason = drawChain(frame)
+            // The stage probes (Phase 1.6) are flushed on every
+            // frame they ran for, drawn or charcoal — a partial
+            // probe line still names where the chain stopped.
+            flushStageProbes()
             if (drawReason == null) {
                 drawDecision.markDrawn(frame.hash)
                 GlDrawStats.noteDrawn()
@@ -316,7 +336,8 @@ class GlRenderer(
         val attempts = GlDrawStats.attemptedCount()
         val firstDirect = where == "direct" && GlDrawStats.directDrawnCount() == 1L
         val firstChain = where == "chain" && GlDrawStats.drawnCount() == 1L
-        if (!firstDirect && !firstChain && attempts % 300L != 0L) return
+        val firstBisect = where.startsWith("bisect-") && GlDrawStats.bisectDrawnCount() == 1L
+        if (!firstDirect && !firstChain && !firstBisect && attempts % 300L != 0L) return
         try {
             val px = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder())
             GLES30.glReadPixels(
@@ -331,6 +352,98 @@ class GlRenderer(
             )
         } catch (e: Throwable) {
             Log.d(TAG, "DotGl: presented-pixel probe failed: ${e.message}")
+        }
+    }
+
+    /**
+     * The bisection bypass (Phase 1.6): draws a chain stage's
+     * target straight to the screen through the passthrough shader
+     * — the same known-good path the direct pattern proved — with
+     * the charcoal surround the real final pass draws. Returns
+     * null when it drew (the caller marks the frame drawn, as for
+     * the full chain); a charcoal reason when a guard fired, so the
+     * hash stays unconsumed. The quad is unflipped, like the
+     * direct pattern: the test pattern is flip-invariant, so the
+     * discriminator is unaffected by orientation.
+     */
+    private fun bisectToScreen(tex: Int, w: Int, h: Int, stage: ChainStage): CharcoalReason? {
+        if (surfaceWidth <= 0 || surfaceHeight <= 0) {
+            clearCharcoalFull()
+            return CharcoalReason.Surface
+        }
+        val targetHeight = resolveTargetHeight()
+        val onScreen = onScreenGameArea(targetHeight)
+        if (onScreen.first <= 0 || onScreen.second <= 0) {
+            clearCharcoalFull()
+            return CharcoalReason.Area
+        }
+        clearCharcoalFull()
+        val offsetX = (surfaceWidth - onScreen.first) / 2
+        val offsetY = (surfaceHeight - onScreen.second) / 2
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        runPass(
+            vert = "dot-common.vert", frag = "passthrough.frag",
+            inputTex = tex, inputW = w, inputH = h,
+            outFbo = 0, outW = onScreen.first, outH = onScreen.second,
+            viewportX = offsetX, viewportY = offsetY,
+            flipped = false,
+        )
+        frameCount++
+        GlDrawStats.noteBisectDrawn()
+        probePresentedPixel("bisect-${stage.pref}")
+        checkGl("bisect-${stage.pref}")
+        return null
+    }
+
+    /**
+     * Reads the centre pixel of the framebuffer the last pass just
+     * drew (still bound as the read framebuffer) and records it for
+     * this frame's probe line. GL_FLOAT: the FBO targets are
+     * RGBA16F first (RGBA8 on failure), and a UNSIGNED_BYTE
+     * readback from a half-float target is invalid — it would read
+     * back zeros and misreport every stage as black. A readback
+     * failure is logged, never latched: a failed probe must not
+     * fail the chain it is measuring.
+     */
+    private fun probeStage(name: String, w: Int, h: Int) {
+        if (!doStageProbes) return
+        try {
+            val px = ByteBuffer.allocateDirect(16)
+                .order(ByteOrder.nativeOrder()).asFloatBuffer()
+            GLES30.glReadPixels(
+                w / 2, h / 2, 1, 1,
+                GLES30.GL_RGBA, GLES30.GL_FLOAT, px,
+            )
+            val r = (px.get(0) * 255f).toInt().coerceIn(0, 255)
+            val g = (px.get(1) * 255f).toInt().coerceIn(0, 255)
+            val b = (px.get(2) * 255f).toInt().coerceIn(0, 255)
+            val a = (px.get(3) * 255f).toInt().coerceIn(0, 255)
+            frameProbes += StageProbe(ChainStage.fromPref(name), r, g, b, a)
+        } catch (e: Throwable) {
+            Log.d(TAG, "DotGl: stage-probe $name failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Logs this frame's stage probes and stores them for the
+     * on-screen draw stats (Phase 1.6). Called from onDrawFrame
+     * after drawChain returns, on every frame the probes ran for.
+     * Names the first black stage in the log, so the next bug
+     * report carries the bisection result.
+     */
+    private fun flushStageProbes() {
+        if (!doStageProbes) return
+        doStageProbes = false
+        stageProbeArmed = false
+        if (frameProbes.isEmpty()) return
+        val line = frameProbes.joinToString(" ") {
+            "${it.stage.pref}=(${it.r},${it.g},${it.b},${it.a})"
+        }
+        Log.d(TAG, "DotGl: stage-probes $line")
+        GlDrawStats.noteStageProbes(frameProbes)
+        val firstBlack = ChainBisect.firstBlackStage(frameProbes)
+        if (firstBlack != null) {
+            Log.d(TAG, "DotGl: stage-probes first black at ${firstBlack.pref}")
         }
     }
 
@@ -364,13 +477,32 @@ class GlRenderer(
             internal.second > onScreen.second
         val inversionOn = true // Locked ON in Phase 1.
 
+        // Stage probes (Phase 1.6): armed on the first frame after
+        // the toggle turns on, then every 300th attempt — the same
+        // throttle as the presented-pixel probe, so a probed frame
+        // costs a dozen 1-pixel readbacks at most twice a minute.
+        val probesOn = stageProbes()
+        if (probesOn && !lastStageProbesOn) stageProbeArmed = true
+        lastStageProbesOn = probesOn
+        doStageProbes = probesOn &&
+            (stageProbeArmed || GlDrawStats.attemptedCount() % 300L == 0L)
+        frameProbes.clear()
+
         // The chain label names what actually drew (§1.1). The
         // test-pattern diagnostic appends its mark, so a benchmark
         // or failure report can never be mistaken for a game
-        // picture.
+        // picture — and the bisection selector appends its stage,
+        // so a bisect draw is never mistaken for the full chain.
         val patternOn = testPattern()
+        val bisect = ChainStage.fromPref(chainStage())
         val label = ChainParity.chainLabel(useMitchell)
-        host.onChainLabel(if (patternOn) "$label + test-pattern" else label)
+        val marks = buildList {
+            if (patternOn) add("test-pattern")
+            if (bisect != ChainStage.OFF) add("bisect-${bisect.pref}")
+        }
+        host.onChainLabel(
+            if (marks.isEmpty()) label else "$label + ${marks.joinToString(" + ")}",
+        )
 
         pool.beginFrame()
         val exclude = if (historyTargetId >= 0) setOf(historyTargetId) else emptySet()
@@ -383,6 +515,23 @@ class GlRenderer(
         val debanded = if (patternOn) TestPattern.ARGB else Deband.deband(frame.argb)
         uploadSource(debanded)
         uploadMask(frame.deflickerMask)
+        // The upload probe is read on the CPU: the uploaded pixels
+        // ARE debanded (or the pattern), and the source is a
+        // texture, not a framebuffer — glReadPixels cannot read it
+        // without binding it to a read target. The invert probe
+        // below validates the texture path itself (it reads
+        // sourceTex through the dither-invert pass).
+        if (doStageProbes) {
+            val centre = debanded[(SRC_H / 2) * SRC_W + (SRC_W / 2)]
+            frameProbes += StageProbe(
+                ChainStage.UPLOAD,
+                (centre shr 16) and 0xFF, (centre shr 8) and 0xFF,
+                centre and 0xFF, (centre ushr 24) and 0xFF,
+            )
+        }
+        if (bisect == ChainStage.UPLOAD) {
+            return bisectToScreen(sourceTex, SRC_W, SRC_H, bisect)
+        }
 
         // FBO pass count (for the flip parity, §1.3). Counted from
         // the passes actually run this frame, not a constant — the
@@ -397,6 +546,10 @@ class GlRenderer(
             outFbo = invertTarget.fbo, outW = SRC_W, outH = SRC_H,
         )
         fboPasses++
+        probeStage("invert", SRC_W, SRC_H)
+        if (bisect == ChainStage.INVERT) {
+            return bisectToScreen(invertTarget.tex, SRC_W, SRC_H, bisect)
+        }
 
         // 3. Deflicker-blend the inverted frame against the stored
         // inverted frame n-1 (the history target, or the inverted
@@ -416,6 +569,10 @@ class GlRenderer(
             outFbo = deflickerTarget.fbo, outW = SRC_W, outH = SRC_H,
         )
         fboPasses++
+        probeStage("deflicker", SRC_W, SRC_H)
+        if (bisect == ChainStage.DEFLICKER) {
+            return bisectToScreen(deflickerTarget.tex, SRC_W, SRC_H, bisect)
+        }
         // The current inverted frame becomes the history; the old
         // history target is released (no longer excluded).
         historyTargetId = invertTarget.id
@@ -464,6 +621,10 @@ class GlRenderer(
             outFbo = scalefxTarget.fbo, outW = SCALEFX_W, outH = SCALEFX_H,
         )
         fboPasses++
+        probeStage("scalefx", SCALEFX_W, SCALEFX_H)
+        if (bisect == ChainStage.SCALEFX) {
+            return bisectToScreen(scalefxTarget.tex, SCALEFX_W, SCALEFX_H, bisect)
+        }
 
         // 5. rAA passes 0-1 (horizontal, then vertical).
         val raa0Target = acquireGl(SCALEFX_W, SCALEFX_H, TargetFilter.NEAREST, exclude)
@@ -480,6 +641,10 @@ class GlRenderer(
             outFbo = raa1Target.fbo, outW = SCALEFX_W, outH = SCALEFX_H,
         )
         fboPasses++
+        probeStage("raa", SCALEFX_W, SCALEFX_H)
+        if (bisect == ChainStage.RAA) {
+            return bisectToScreen(raa1Target.tex, SCALEFX_W, SCALEFX_H, bisect)
+        }
 
         // 6. Sharp-bilinear final resample to the internal game area
         // (the game target is LINEAR — it is downsampled by Mitchell
@@ -493,6 +658,10 @@ class GlRenderer(
             outFbo = gameTarget.fbo, outW = internal.first, outH = internal.second,
         )
         fboPasses++
+        probeStage("sharp", internal.first, internal.second)
+        if (bisect == ChainStage.SHARP) {
+            return bisectToScreen(gameTarget.tex, internal.first, internal.second, bisect)
+        }
 
         // 7. Mitchell downscale, only when internal > screen.
         var rcasInputTex = gameTarget.tex
@@ -520,6 +689,10 @@ class GlRenderer(
                 outFbo = mitchellV.fbo, outW = onScreen.first, outH = onScreen.second,
             )
             fboPasses++
+            probeStage("mitchell", onScreen.first, onScreen.second)
+            if (bisect == ChainStage.MITCHELL) {
+                return bisectToScreen(mitchellV.tex, onScreen.first, onScreen.second, bisect)
+            }
             rcasInputTex = mitchellV.tex
             rcasInputW = onScreen.first
             rcasInputH = onScreen.second
@@ -544,6 +717,11 @@ class GlRenderer(
             viewportX = offsetX, viewportY = offsetY,
             flipped = flip, blueNoise = true,
         )
+        // The RCAS probe reads the default framebuffer's centre —
+        // the pixels the swap is about to present. It is the last
+        // entry of the frame's probe line, so the line names the
+        // final pass too.
+        probeStage("rcas", onScreen.first, onScreen.second)
         frameCount++
         probePresentedPixel("chain")
         checkGl("chain")

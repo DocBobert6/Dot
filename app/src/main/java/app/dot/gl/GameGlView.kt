@@ -42,6 +42,10 @@ class GameGlView @JvmOverloads constructor(
     private val testPattern: () -> Boolean = { false },
     /** The direct-pattern diagnostic flag (Developer toggle, default off). Read live on every frame. */
     private val directPattern: () -> Boolean = { false },
+    /** The chain-stage bisection selector (Developer setting, default off). Read live on every frame. */
+    private val chainStage: () -> String = { "off" },
+    /** The per-stage centre-pixel probes (Developer toggle, default off). Read live on every frame. */
+    private val stageProbes: () -> Boolean = { false },
 ) : GLSurfaceView(context, attrs), GlChainHost {
 
     private val gate = FrameRenderGate()
@@ -55,6 +59,9 @@ class GameGlView @JvmOverloads constructor(
 
     /** The test-pattern flag as last seen by postFrame (toggle-change detection). */
     private var lastPatternOn = testPattern()
+
+    /** The chain-stage selector as last seen by postFrame (change detection). */
+    private var lastChainStage = chainStage()
 
     /** Set once the first frame has been delivered (first-frame log). */
     @Volatile private var firstFrameLogged = false
@@ -80,7 +87,7 @@ class GameGlView @JvmOverloads constructor(
             setEGLContextClientVersion(3)
             setEGLConfigChooser(8, 8, 8, 8, 0, 0)
             preserveEGLContextOnPause = true
-            created = GlRenderer(context, this, pictureTarget, testPattern, directPattern)
+            created = GlRenderer(context, this, pictureTarget, testPattern, directPattern, chainStage, stageProbes)
             setRenderer(created)
             renderMode = RENDERMODE_WHEN_DIRTY
         } catch (e: Throwable) {
@@ -152,6 +159,17 @@ class GameGlView @JvmOverloads constructor(
             lastPatternOn = patternOn
             deliveryGate.invalidate()
             Log.d(TAG, "DotGl: test pattern ${if (patternOn) "ON" else "OFF"} — delivery gate reset")
+        }
+        // A chain-stage selector change forces the next frame
+        // through for the same reason: the bypass draws a different
+        // picture from the same game frame, so the gate's hash must
+        // not suppress it — and returning to Off must re-draw the
+        // full chain.
+        val stage = chainStage()
+        if (stage != lastChainStage) {
+            lastChainStage = stage
+            deliveryGate.invalidate()
+            Log.d(TAG, "DotGl: chain stage $stage — delivery gate reset")
         }
         if (!deliveryGate.deliverIfChanged(frame.hash)) {
             GlDrawStats.noteHashSkipped()

@@ -131,6 +131,14 @@ fun GameScreen(
             // through-chain pattern does not, the chain's output is
             // the fault; if neither shows, the surface path is.
             directPattern = { prefs.getBoolean("dev_direct_pattern", false) },
+            // The chain-stage bisection selector, read live on every
+            // frame (Developer setting, default off). Stops the
+            // chain after the chosen stage and draws that stage's
+            // target straight to the screen.
+            chainStage = { prefs.getString("dev_chain_stage", "off") ?: "off" },
+            // The per-stage centre-pixel probes, read live on every
+            // frame (Developer toggle, default off).
+            stageProbes = { prefs.getBoolean("dev_stage_probes", false) },
         )
     }
     // A view-creation failure (no GLES 3.0) is set synchronously in
