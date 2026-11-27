@@ -46,9 +46,15 @@ object GlDrawStats {
         attempted.incrementAndGet()
     }
 
+    /** Draws attempted so far (for the throttled logcat summary). */
+    fun attemptedCount(): Long = attempted.get()
+
     fun noteDrawn() {
         drawn.incrementAndGet()
     }
+
+    /** Frames that actually drew so far (for the first-draw log). */
+    fun drawnCount(): Long = drawn.get()
 
     fun noteCharcoal(reason: CharcoalReason) {
         when (reason) {
