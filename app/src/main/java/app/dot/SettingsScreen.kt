@@ -969,6 +969,7 @@ private fun ChoiceRow(
  * the chain-stage selector has nine options, which never fit one
  * row.
  */
+@Composable
 private fun ChoiceFlowRow(
     label: String,
     options: List<Pair<String, String>>,

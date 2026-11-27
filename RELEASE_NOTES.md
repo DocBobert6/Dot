@@ -1,19 +1,18 @@
-# Dot 0.1.0-phase1.5 — Phase 1: two experiments to pin the black screen
+# Dot 0.1.0-phase1.6 — Phase 1: bisect the picture chain
 
-The picture still does not reach the screen: in 1.4 the test pattern drew twice through the graphics chain with no errors and stayed invisible, so the fault is in the surface path, not the game and not the chain. This build adds the two experiments that isolate it. The first draws the same magenta/cyan checkerboard straight to the screen, bypassing the whole graphics chain. The second puts the game surface above the window. Together they tell us whether the chain's output, the surface ordering, or the swap itself is at fault — and only the pinned cause gets fixed next.
+The surface path is exonerated: in 1.5 the direct pattern (the same checkerboard drawn straight to the screen, bypassing the chain) showed crisp and true-coloured, and the media-overlay test showed a uniform charcoal rectangle — the charcoal clear presents, but the game quad never lands in it. So the fault is inside the graphics chain: some stage turns the picture black, and every later stage only propagates it. This build adds the bisection that names it. Run the chain only up to a chosen stage and draw that stage straight to the screen, or read the centre pixel after every pass — either way, the first stage that outputs black is the one to fix next, and only the pinned cause gets fixed.
 
 ## New features
 
-- Direct-pattern diagnostic (Settings → Developer, default off): a bright magenta/cyan checkerboard drawn straight to the screen with a trivial shader, bypassing the whole graphics chain. Pattern visible here but invisible through the chain means the chain's output is the fault; invisible in both means the surface path is.
-- Media-overlay diagnostic (Settings → Developer, default off): puts the game surface above the window. If the picture appears with this on, the surface was sitting below an opaque window.
+- Chain-stage selector (Settings → Developer, default off): runs the graphics chain only up to the chosen stage — Upload, Invert, DeFlicker, ScaleFX, rAA, Sharp, Mitchell, or the full chain (RCAS) — then draws that stage's output straight to the screen. Use with the test pattern on: a stage that shows the pattern is fine, the first stage that shows black is the fault.
+- Stage probes (Settings → Developer, default off): reads the centre pixel after every chain pass and logs it, and shows the line in the live draw stats — so the log names the first pass that outputs black without needing a bug report.
 
 ## Improvements
 
-- The frame path now logs what the screen is about to be given: the centre pixel of the presented buffer is read back after each draw, so a bug report shows whether the chain produced real pixels or black.
+- The chain label now records the bisection stage, so a report can never mistake a bisect draw for the full chain.
 
 ## Bug fixes
 
-- Fixed the Auto/1080p/4K picture choice in Settings having no effect: the player read a preference key nothing ever wrote, so it always ran Auto. It now reads the same key Settings writes.
 - Various bug fixes and stability improvements
 
 ## Maintenance
