@@ -28,6 +28,15 @@ object GlDrawStats {
     @Volatile private var lastCharcoalReason: CharcoalReason? = null
     private val latchFailed = AtomicBoolean(false)
 
+    /**
+     * The latest per-stage centre-pixel probes (Phase 1.6): one
+     * "stage=(r,g,b,a)" entry per stage, in chain order. Written by
+     * the renderer on the GL thread, read by the snapshot on the
+     * main thread; the whole line is replaced atomically per frame,
+     * so the snapshot never shows a half-written frame.
+     */
+    @Volatile private var stageProbeLine: String = ""
+
     /** A fresh GL context starts the counts over. */
     fun reset() {
         attempted.set(0)
@@ -42,6 +51,7 @@ object GlDrawStats {
         lastSurfaceH = 0
         lastCharcoalReason = null
         latchFailed.set(false)
+        stageProbeLine = ""
     }
 
     fun noteAttempt() {
@@ -97,6 +107,21 @@ object GlDrawStats {
         latchFailed.set(true)
     }
 
+    /**
+     * Records one frame's per-stage centre-pixel probes (Phase
+     * 1.6). The list arrives in chain order; the snapshot shows it
+     * verbatim, so the log (and the on-screen draw stats) name the
+     * stage that first outputs black without a bug report.
+     */
+    fun noteStageProbes(probes: List<StageProbe>) {
+        stageProbeLine = probes.joinToString(" ") {
+            "${it.stage.pref}=(${it.r},${it.g},${it.b},${it.a})"
+        }
+    }
+
+    /** The latest stage-probe line (empty when none were recorded). */
+    fun stageProbesText(): String = stageProbeLine
+
     private fun charcoalTotal(): Long =
         charcoalLatch.get() + charcoalSurface.get() + charcoalArea.get()
 
@@ -125,5 +150,10 @@ object GlDrawStats {
         "Last surface: ${lastSurfaceW}x$lastSurfaceH",
         "Last charcoal reason: ${reasonName(lastCharcoalReason)}",
         "Latch failed: ${if (latchFailed.get()) "yes" else "no"}",
-    ).joinToString("\n")
+    ).let { lines ->
+        // The stage-probe line appears only once a probe frame was
+        // recorded, so the empty snapshot (and the reset test's
+        // exact-text assertion) is unchanged.
+        if (stageProbeLine.isEmpty()) lines else lines + "Stage probes: $stageProbeLine"
+    }.joinToString("\n")
 }

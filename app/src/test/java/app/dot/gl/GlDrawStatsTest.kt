@@ -1,6 +1,7 @@
 package app.dot.gl
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -95,5 +96,38 @@ class GlDrawStatsTest {
         assertTrue(text.contains("Draws shown: 0"))
         GlDrawStats.reset()
         assertTrue(GlDrawStats.snapshot().contains("Direct draws: 0"))
+    }
+
+    @Test
+    fun stageProbesAppearInSnapshotInChainOrder() {
+        // The per-stage probes (Phase 1.6) show in the snapshot in
+        // chain order, so the on-screen draw stats name the stage
+        // that first outputs black without a bug report.
+        GlDrawStats.noteStageProbes(
+            listOf(
+                StageProbe(ChainStage.UPLOAD, 255, 0, 255, 255),
+                StageProbe(ChainStage.INVERT, 0, 0, 0, 255),
+                StageProbe(ChainStage.RCAS, 0, 0, 0, 255),
+            ),
+        )
+        val text = GlDrawStats.snapshot()
+        assertTrue(
+            text.contains(
+                "Stage probes: upload=(255,0,255,255) " +
+                    "invert=(0,0,0,255) rcas=(0,0,0,255)",
+            ),
+        )
+        // A later frame replaces the line wholesale, and the reset
+        // clears it — the empty snapshot is unchanged.
+        GlDrawStats.noteStageProbes(
+            listOf(StageProbe(ChainStage.UPLOAD, 0, 255, 255, 255)),
+        )
+        assertTrue(
+            GlDrawStats.snapshot().contains(
+                "Stage probes: upload=(0,255,255,255)",
+            ),
+        )
+        GlDrawStats.reset()
+        assertFalse(GlDrawStats.snapshot().contains("Stage probes:"))
     }
 }
