@@ -13,6 +13,7 @@ The picture still does not reach the screen: in 1.4 the test pattern drew twice 
 
 ## Bug fixes
 
+- Fixed the Auto/1080p/4K picture choice in Settings having no effect: the player read a preference key nothing ever wrote, so it always ran Auto. It now reads the same key Settings writes.
 - Various bug fixes and stability improvements
 
 ## Maintenance
